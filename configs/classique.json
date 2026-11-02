@@ -1,0 +1,10 @@
+{
+  "description": "Modèle classique : lambda_in = 1, lambda_out = 0 et alpha = 1 figés dans toutes les couches. Chaque couche spectrale calcule alors exactement une Conv2D (ou DepthwiseConv2D), ou une Conv1D pour des signaux ; seuls les filtres phi sont entraînés.",
+  "default": {
+    "trainable_phi": true,
+    "trainable_lambda_in": false,
+    "trainable_lambda_out": false,
+    "trainable_alpha": false
+  },
+  "layers": {}
+}

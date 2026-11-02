@@ -1,0 +1,20 @@
+# Environnement GPU (WSL2 + carte NVIDIA) pour models_spectral
+#
+# Prérequis côté Windows : un pilote NVIDIA récent avec prise en charge de WSL.
+# N'installez PAS de pilote ni de CUDA dans Ubuntu/WSL : tensorflow[and-cuda]
+# apporte lui-même les bibliothèques CUDA 12 et cuDNN 9 via pip.
+#
+# Installation (Python 3.10 à 3.13) :
+#   python3 -m venv ~/venvs/spectral && source ~/venvs/spectral/bin/activate
+#   pip install --upgrade pip
+#   pip install -r requirements.txt
+#
+# Vérification du GPU :
+#   python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+# Vérification des modèles :
+#   python verifier_modeles.py spectral_resnet20
+
+tensorflow[and-cuda]==2.21.0   # version avec laquelle le paquet a été testé (Keras 3.15)
+numpy>=1.26
+matplotlib>=3.8                # figures du notebook analyse_lambda_in.ipynb
+notebook>=7                    # analyse_lambda_in.ipynb (jupyter notebook)

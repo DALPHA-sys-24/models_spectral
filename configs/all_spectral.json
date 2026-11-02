@@ -1,0 +1,11 @@
+{
+  "description": "Toutes les couches entraînent phi et lambda_in ; lambda_out et alpha restent figés. Ajouter des règles dans layers (\"3\", \"1-5\", \"*\") pour d'autres montages.",
+  "default": {
+    "trainable_phi": true,
+    "trainable_lambda_in": true,
+    "trainable_lambda_out": false,
+    "trainable_alpha": false,
+    "lambda_in_l1": 1e-6
+  },
+  "layers": {}
+}

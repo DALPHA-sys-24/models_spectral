@@ -1,0 +1,14 @@
+# Environnement CPU pour analyse_lambda_in.ipynb (aucun GPU nécessaire)
+#
+# Installation (Python 3.10 à 3.13), depuis models_spectral/ :
+#   python3 -m venv ~/venvs/spectral-cpu && source ~/venvs/spectral-cpu/bin/activate
+#   pip install --upgrade pip
+#   pip install -r requirements-cpu.txt
+#   jupyter notebook analyse_lambda_in.ipynb
+# Dans le notebook : DEVICE = "/CPU:0" (cellule Paramètres).
+
+tensorflow-cpu==2.21.0   # même version que l'entraînement (Keras 3.15), sans CUDA
+numpy>=1.26
+matplotlib>=3.8
+notebook>=7
+ipykernel>=6

@@ -1,0 +1,15 @@
+{
+  "description": "Premier test : la première couche (indice 0) entraîne les filtres phi et lambda_in ; toutes les autres couches ont lambda_in = 1, lambda_out = 0 et alpha = 1 figés (Conv2D classiques, Conv1D pour des signaux). lambda_out et alpha restent figés partout.",
+  "default": {
+    "trainable_phi": true,
+    "trainable_lambda_in": false,
+    "trainable_lambda_out": false,
+    "trainable_alpha": false
+  },
+  "layers": {
+    "0": {
+      "trainable_lambda_in": true,
+      "lambda_in_l1": 1e-6
+    }
+  }
+}

@@ -1,0 +1,40 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# --- Environnements virtuels ---
+.venv/
+venvs/
+venv/
+env/
+.env
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Résultats des expériences (lourds, régénérables) ---
+# runs/ : dossiers de run_experiment.py (config, poids, lambda_in, runs_summary.csv)
+# runs_search/ : recherches de search_hparams.py ; runs_pruning/ : résultats de pruning.py
+runs/
+runs_search/
+runs_pruning/
+*.weights.h5
+*.h5
+*.keras
+
+# --- Données (datasets téléchargés ou fichiers locaux) ---
+# Les datasets téléchargés vont dans ~/.keras/datasets/, hors du projet.
+data/
+*.npz
+*.pkl
+
+# --- Éditeurs et systèmes ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
