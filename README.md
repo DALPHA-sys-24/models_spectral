@@ -5,37 +5,53 @@ Modèles de référence (ResNet, MobileNet) dont toutes les convolutions sont sp
 Un fichier de configuration dit, couche par couche, quels poids sont entraînés (phi, lambda_in,
 lambda_out, alpha). Après l'entraînement, les poids lambda_in servent au pruning d'ordre p.
 
+## Installation
+
+```bash
+python3 -m venv ~/venvs/spectral && source ~/venvs/spectral/bin/activate
+pip install -r requirements_gpu.txt    # GPU (requirements_cpu.txt sans GPU)
+pip install -e .                       # le paquet specprune et les commandes specprune-*
+```
+
+`pip install -e .` est facultatif : les scripts de la racine marchent sans, lancés depuis
+`models_spectral/`. Avec, on peut écrire `specprune-train ...` (= `python run_experiment.py ...`)
+de n'importe quel dossier, et `import specprune` dans tout script ou notebook.
+
 ## Arborescence
 
 ```
 models_spectral/
-├── run_experiment.py        entraîne un modèle et enregistre le run (config, poids, lambda_in)
-├── search_hparams.py        cherche lr et batch (epochs fixés) en lançant run_experiment.py
-├── pruning.py               pruning d'ordre p d'un ou plusieurs runs : pré et/ou post-training
-├── plot_results.py          figures de publication à partir des résultats enregistrés
+├── run_experiment.py        entraîne un ou plusieurs runs           (= specprune-train)
+├── search_hparams.py        cherche lr et batch                     (= specprune-search)
+├── pruning.py               pruning d'ordre p : pré et/ou post      (= specprune-prune)
+├── plot_results.py          figures de publication                  (= specprune-plot)
+├── bench_memory.py          mémoire des couches spectrales          (= specprune-bench)
+├── specprune/               le paquet (les scripts ci-dessus n'en sont que des raccourcis)
+│   ├── layers/                  couches SpecCnn1D et SpecCnn2D
+│   ├── models/                  architectures (registre, ResNet, MobileNet, AgentNetwork)
+│   ├── data.py                  datasets images et signaux, normalisation, tf.data
+│   ├── training.py              appareil, optimiseur, compilation (recette d'entraînement)
+│   ├── runs.py                  sauvegarde d'un run et rechargement (load_run, load_run_data)
+│   ├── checks.py                vérifications avant un lancement
+│   ├── prune.py                 pruning d'ordre p, évaluation (pre), gel des lambda (post)
+│   ├── plotting.py              figures style Nature Communications (sans titre, en anglais)
+│   └── cli/                     code des commandes (train, search, prune, plot, bench, common)
 ├── configs/
 │   ├── spectral_config.json     défaut : couche 0 = phi + lambda_in, les autres = Conv classiques
 │   ├── classique.json           tous les lambda figés : modèle classique (seuls les phi)
 │   └── all_spectral.json        lambda_in entraîné dans toutes les couches
-├── spectralcnn/             couches SpecCnn1D et SpecCnn2D
-├── models/                  architectures (registre, ResNet, MobileNet, AgentNetwork)
-├── tools/                   bibliothèque commune aux scripts
-│   ├── data.py                  datasets images et signaux, normalisation, tf.data
-│   ├── training.py              appareil, optimiseur, compilation (recette d'entraînement)
-│   ├── runs.py                  sauvegarde d'un run et rechargement (load_run, load_run_data)
-│   ├── prune.py                 pruning d'ordre p, évaluation (pre), gel des lambda (post)
-│   └── plotting.py              figures style Nature Communications (sans titre, en anglais)
+├── experiments/
+│   └── serie.sh                 série complète : N runs -> pruning pré et post -> figures
 ├── notebooks/
-│   └── analyse_lambda_in.ipynb  pruning d'ordre p en images : masques, exemples, précision (pre)
-├── tests/
-│   ├── verifier_modeles.py      équivalences avec Conv1D / Conv2D, construction des modèles
-│   └── test_pruning.py          vérifications de tools/prune.py
-├── requirements.txt         GPU (WSL / Linux)
-└── requirements-cpu.txt     CPU (ex. Windows pour les notebooks)
+│   ├── analyse_lambda_in.ipynb  pruning d'ordre p en images : masques, exemples, précision (pre)
+│   └── make_notebook.py         génère le notebook (le modifier ici, pas dans le .ipynb)
+├── tests/                   pytest : couches, modèles, pruning, chaîne complète
+├── pyproject.toml           paquet, dépendances, commandes, réglages de pytest
+├── requirements_gpu.txt     GPU (WSL / Linux)
+└── requirements_cpu.txt     CPU (ex. Windows pour les notebooks)
 ```
 
-Les scripts se lancent depuis la racine `models_spectral/`. Les résultats vont dans `runs/`,
-`runs_search/` et `runs_pruning/` (ignorés par git).
+Les résultats vont dans `runs/`, `runs_search/` et `runs_pruning/` (ignorés par git).
 
 ## Déroulement
 
@@ -58,6 +74,14 @@ Plusieurs runs identiques (graines 42, 43, ...) avec `--n_runs` :
 python run_experiment.py --dataset cifar10 --lr 0.1 --batch_size 128 --epochs 20 --n_runs 5 --run_name cifar10_5seeds
 # -> runs/cifar10_5seeds/seed42/ ... seed46/
 python pruning.py runs/cifar10_5seeds/seed* --mode pre
+```
+
+Un run interrompu (coupure, Ctrl-C, machine arrêtée) reprend à la dernière epoch terminée : un
+point de reprise est écrit à chaque epoch dans `<run>/backup/` (effacé à la fin du run).
+
+```bash
+python run_experiment.py --resume runs/<run>              # un run
+python run_experiment.py --resume runs/cifar10_5seeds     # un groupe --n_runs : runs non terminés
 ```
 
 Recherche de lr et batch (20 epochs) : `python search_hparams.py --arch spectral_resnet20 --dataset cifar10`.
@@ -103,6 +127,20 @@ mode, p et répétition), `summary.csv` (médiane, quantiles 5 % et 95 % par mod
 les masques de chaque p et l'historique de chaque réentraînement.
 `--resume <dossier>` reprend un pruning interrompu.
 
+Plusieurs GPU : `--gpus 0 1` lance un processus par GPU sur le même dossier ; les couples
+(run, p, répétition) sont répartis entre eux, chacun écrit `results_part<k>.csv` et son journal
+`log_gpu<k>.txt`, et le résumé est fait sur l'ensemble à la fin.
+
+```bash
+python pruning.py runs/cifar10_5seeds/seed* --mode post --gpus 0 1
+```
+
+Vérifications avant le calcul : les runs donnés ensemble doivent être comparables (même dataset,
+forme d'entrée, architecture, largeur et configuration spectrale), sinon le script s'arrête au
+lieu de mélanger leurs résultats dans la médiane (`--allow_mixed` pour passer outre). Si
+`lambda_out` est entraîné là où `lambda_in` l'est, un avertissement le signale : la précision à
+p = 1 ne tombera pas au hasard (W = −alpha·phi·lambda_out reste).
+
 ### 3. Figures
 
 Les scripts enregistrent les données ; les figures se font à part avec `plot_results.py`, sans
@@ -122,10 +160,21 @@ deux colonnes), `--height_mm`, `--font`, `--font_size`, `--line_width`, `--no_ma
 `--legend`, `--xlim`, `--ylim`, `--stat`, `--band`, `--individual`, `--formats`, `--dpi`, `--out`
 (`python plot_results.py pruning -h`). Sans `--out`, la figure va dans `<dossier>/figures/`.
 
-### 4. Analyser
+### 4. Série complète
+
+`experiments/serie.sh` enchaîne tout (entraînement de N graines, pruning pré et post, figures) et
+reprend là où il s'est arrêté si on le relance. Les réglages se changent par variables :
+
+```bash
+bash experiments/serie.sh                                         # cifar10, 5 runs, 20 epochs
+DATASET=mnist N_RUNS=3 EPOCHS=30 LR=0.05 bash experiments/serie.sh
+GPUS="0 1" bash experiments/serie.sh                              # pruning sur deux GPU
+```
+
+### 5. Analyser
 
 `notebooks/analyse_lambda_in.ipynb` (à lancer depuis `notebooks/`) : version visuelle de
-`pruning.py --mode pre`, avec les mêmes fonctions de `tools/` et les mêmes options (`P_VALUES`,
+`pruning.py --mode pre`, avec les mêmes fonctions de `specprune` et les mêmes options (`P_VALUES`,
 `PARAM`, `LAYERS`, `METHOD`, `CRITERION`) : valeurs brutes de lambda_in, importance de chaque
 entrée (pixel ou instant), masques de chaque p sur la carte et sur des exemples, précision du
 modèle élagué. Pour les mêmes réglages, il donne les mêmes précisions que `pruning.py`.
@@ -150,8 +199,8 @@ couche est alors exactement une convolution classique.
 ## Réutiliser un run en Python
 
 ```python
-from tools.runs import load_run, load_run_data
-from tools.prune import prune_spectral
+from specprune.runs import load_run, load_run_data
+from specprune.prune import prune_spectral
 
 agent, config = load_run("runs/<run>")          # modèle reconstruit + poids du run
 train, val, test, info = load_run_data(config)  # mêmes données, même normalisation
@@ -162,9 +211,40 @@ probs = agent.predict(test[0])
 Le modèle est reconstruit depuis `config.json` puis ses poids sont rechargés : c'est plus sûr
 qu'un fichier `.keras`, qui dépendrait de la configuration spectrale active au chargement.
 
-## Vérifications
+## Mémoire
+
+Une couche spectrale garde, pour la rétropropagation, les fenêtres de son entrée `X_win`
+(B, O, K, C) : K fois (9 fois en 3x3) l'entrée d'une convolution classique. Pour ResNet-20 sur
+cifar10 avec un batch de 128, cela fait environ 750 Mio pour l'ensemble des couches, et le pic
+d'un pas d'entraînement dépasse 1 Gio : c'est l'ordre de grandeur de l'allocation de 1,26 Gio vue
+sur cifar10. `bench_memory.py` donne le détail par couche et, sur GPU, le pic mesuré selon le batch
+(avec et sans XLA) :
 
 ```bash
-python tests/verifier_modeles.py spectral_resnet20
-python tests/test_pruning.py
+python bench_memory.py --dataset cifar10 --arch spectral_resnet20 --batch_size 64 128 256
+python bench_memory.py --input_shape 32 32 3 --num_classes 10        # sans charger de données
 ```
+
+## Tests
+
+```bash
+pip install pytest
+pytest                      # couches, modèles, pruning, chaîne complète sur données synthétiques (CPU, ~5 min)
+pytest tests/test_models.py -m slow     # en plus : tous les modèles, toutes les formes d'entrée
+```
+
+La chaîne complète (`tests/test_pipeline.py`) entraîne deux graines sur des images et sur des
+signaux synthétiques, coupe un run puis le reprend, fait le pruning pré et post, vérifie que le
+travail réparti en deux parties (comme `--gpus`) donne les mêmes résultats, refuse des runs non
+comparables, puis produit les trois figures.
+
+## Format des dossiers
+
+`config.json` porte un numéro `format_version` (2 actuellement ; absent = 1). Les dossiers de
+la version 1 restent lisibles ; un dossier écrit par une version plus récente du code est refusé
+avec un message clair plutôt que mal interprété.
+
+## Langue
+
+Documentation, messages et options sont en français ; les figures sont en anglais. Le code des
+couches (`specprune/layers/`) garde ses docstrings d'origine en anglais.

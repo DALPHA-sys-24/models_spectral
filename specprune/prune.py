@@ -4,7 +4,7 @@ Pruning des poids spectraux (lambda_in, lambda_out, alpha) des couches SpecCnn1D
 Pruning d'ordre p : dans chaque groupe de valeurs |w|, on calcule le percentile d'ordre p et on met
 à zéro ce qui est en deçà. p est une fraction : 0 = rien, 1 = tout.
 
-    from tools.prune import prune_spectral, freeze_spectral
+    from specprune.prune import prune_spectral, freeze_spectral
     report = prune_spectral(agent, p=0.5, method="element")   # lambda_in des couches entraînées
     freeze_spectral(agent, train="phi")                         # post-training : seuls les phi bougent
 
@@ -28,7 +28,7 @@ from typing import Dict, List, Optional, Sequence, Union
 import keras
 import numpy as np
 
-from spectralcnn import SpecCnn1D, SpecCnn2D
+from .layers import SpecCnn1D, SpecCnn2D
 
 from .runs import spectral_layers, valid_positions
 
@@ -208,7 +208,7 @@ def assign_spectral_weights(agent, weights: Dict[str, np.ndarray], param: str = 
                             verbose: bool = True) -> int:
     """
     Assigne des valeurs calculées ailleurs {nom de couche: tableau} (ex. median_lambda_in de
-    tools.runs, pour partir de la médiane de plusieurs runs). Les noms inconnus sont ignorés.
+    specprune.runs, pour partir de la médiane de plusieurs runs). Les noms inconnus sont ignorés.
     Renvoie le nombre de couches modifiées.
     """
     n = 0

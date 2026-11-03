@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "specprune"
+dynamic = ["version"]
+description = "Convolutions spectrales, pruning d'ordre p de lambda_in et figures"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "tensorflow==2.21.0",
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+gpu = ["tensorflow[and-cuda]==2.21.0"]
+notebook = ["notebook>=7", "ipykernel>=6"]
+test = ["pytest>=7"]
+
+[project.scripts]
+specprune-train = "specprune.cli.train:main"
+specprune-search = "specprune.cli.search:main"
+specprune-prune = "specprune.cli.prune:main"
+specprune-plot = "specprune.cli.plot:main"
+specprune-bench = "specprune.cli.bench:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "specprune.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["specprune*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-m 'not slow'"
+markers = ["slow: entraînements complets (quelques minutes sur CPU)"]

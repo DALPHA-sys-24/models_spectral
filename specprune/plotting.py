@@ -9,7 +9,7 @@ traits fins ; axes haut et droit retirés ; largeur d'une colonne Nature (89 mm)
 (183 mm) ; export vectoriel (PDF, SVG, polices incorporées) et PNG 600 dpi.
 Couleurs : orange, bleu, puis vert (palette Okabe-Ito, lisible par les daltoniens).
 
-    from tools.plotting import Style, plot_pruning, save
+    from specprune.plotting import Style, plot_pruning, save
     style = Style(width_mm=89)
     fig = plot_pruning(["runs_pruning/mnist1d_spectral_resnet20_both_20261102_093000"], style)
     save(fig, "figures/accuracy_vs_p", style)

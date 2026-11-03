@@ -7,7 +7,7 @@ depuis config.json et la copie de spectral_config.json, puis ses poids sont rech
 weights.weights.h5. C'est plus robuste qu'un modèle sérialisé, qui dépendrait de la
 configuration spectrale globale au moment du chargement.
 
-    from tools.runs import load_run, load_run_data
+    from specprune.runs import load_run, load_run_data
     agent, config = load_run("runs/cifar10_spectral_resnet20_20261030_101500")
     train, val, test, info = load_run_data(config)
 """
@@ -22,9 +22,10 @@ import keras
 import numpy as np
 import tensorflow as tf
 
-from models import AgentNetwork, configure_spectral
-from spectralcnn import SpecCnn1D, SpecCnn2D
+from .models import AgentNetwork, configure_spectral
+from .layers import SpecCnn1D, SpecCnn2D
 
+from .checks import check_format
 from .data import load_dataset
 
 WEIGHTS_FILE = "weights.weights.h5"
@@ -130,6 +131,7 @@ def read_config(run_dir: str) -> Dict:
     if not isinstance(config.get("dataset"), dict) or "lambda_in_files" not in config:
         raise ValueError(f"{run_dir} a été produit par une ancienne version de run_experiment.py : "
                          "relancer l'entraînement avec la version actuelle.")
+    check_format(config, run_dir)
     return config
 
 
@@ -202,7 +204,7 @@ def median_lambda_in(run_dirs: List[str], snapshot: str = "final") -> Dict[str, 
 
     Les runs doivent avoir la même architecture et la même configuration spectrale.
     Renvoie {nom de couche: médiane (F, C/groups, L)} ; à donner à assign_spectral_weights
-    (tools.prune) pour partir de ces valeurs.
+    (specprune.prune) pour partir de ces valeurs.
     """
     stacks: Dict[str, list] = {}
     for run_dir in run_dirs:

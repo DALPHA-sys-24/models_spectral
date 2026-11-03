@@ -7,12 +7,12 @@
 # Installation (Python 3.10 à 3.13) :
 #   python3 -m venv ~/venvs/spectral && source ~/venvs/spectral/bin/activate
 #   pip install --upgrade pip
-#   pip install -r requirements.txt
+#   pip install -r requirements_gpu.txt
 #
 # Vérification du GPU :
 #   python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
 # Vérification des modèles :
-#   python verifier_modeles.py spectral_resnet20
+#   pip install -e . && pytest
 
 tensorflow[and-cuda]==2.21.0   # version avec laquelle le paquet a été testé (Keras 3.15)
 numpy>=1.26

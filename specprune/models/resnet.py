@@ -13,7 +13,7 @@ from typing import List
 
 import tensorflow as tf
 
-from .layers import spec_conv_bn
+from .blocks import spec_conv_bn
 from .registry import register_model
 
 L = tf.keras.layers

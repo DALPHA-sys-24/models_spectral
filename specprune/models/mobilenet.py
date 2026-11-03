@@ -11,7 +11,7 @@ Avec lambda_in = 1, lambda_out = 0 et alpha = 1 figés, on retrouve le MobileNet
 """
 import tensorflow as tf
 
-from .layers import spec_conv_bn, spec_depthwise_bn
+from .blocks import spec_conv_bn, spec_depthwise_bn
 from .registry import register_model
 
 L = tf.keras.layers

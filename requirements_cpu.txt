@@ -3,7 +3,7 @@
 # Installation (Python 3.10 à 3.13), depuis models_spectral/ :
 #   python3 -m venv ~/venvs/spectral-cpu && source ~/venvs/spectral-cpu/bin/activate
 #   pip install --upgrade pip
-#   pip install -r requirements-cpu.txt
+#   pip install -r requirements_cpu.txt
 #   jupyter notebook analyse_lambda_in.ipynb
 # Dans le notebook : DEVICE = "/CPU:0" (cellule Paramètres).
 

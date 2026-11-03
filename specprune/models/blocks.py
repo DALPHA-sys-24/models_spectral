@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Union
 
 import tensorflow as tf
 
-from spectralcnn import SpecCnn1D, SpecCnn2D
+from ..layers import SpecCnn1D, SpecCnn2D
 
 L = tf.keras.layers
 

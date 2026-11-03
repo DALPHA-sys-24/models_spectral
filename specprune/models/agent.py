@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 import tensorflow as tf
 
-from .layers import start_backbone
+from .blocks import start_backbone
 from .registry import get_backbone
 
 L = tf.keras.layers
