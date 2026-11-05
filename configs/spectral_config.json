@@ -9,7 +9,7 @@
   "layers": {
     "0": {
       "trainable_lambda_in": true,
-      "lambda_in_l1": 1e-6
+      "lambda_in_l1": 1e-2
     }
   }
 }

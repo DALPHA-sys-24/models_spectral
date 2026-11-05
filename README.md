@@ -189,7 +189,7 @@ s'applique par défaut (`default`), à toutes (`"*"`), à une couche (`"0"`) ou 
 {
   "default": {"trainable_phi": true, "trainable_lambda_in": false,
               "trainable_lambda_out": false, "trainable_alpha": false},
-  "layers": {"0": {"trainable_lambda_in": true, "lambda_in_l1": 1e-6}}
+  "layers": {"0": {"trainable_lambda_in": true, "lambda_in_l1": 1e-2}}
 }
 ```
 
