@@ -21,6 +21,7 @@ env/
 runs/
 runs_search/
 runs_pruning/
+jobs/
 *.weights.h5
 *.h5
 *.keras

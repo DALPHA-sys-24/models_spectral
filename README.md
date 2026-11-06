@@ -26,6 +26,7 @@ models_spectral/
 ├── pruning.py               pruning d'ordre p : pré et/ou post      (= specprune-prune)
 ├── plot_results.py          figures de publication                  (= specprune-plot)
 ├── bench_memory.py          mémoire des couches spectrales          (= specprune-bench)
+├── plan_experiments.py      série découpée en tâches (Slurm, local) (= specprune-plan)
 ├── specprune/               le paquet (les scripts ci-dessus n'en sont que des raccourcis)
 │   ├── layers/                  couches SpecCnn1D et SpecCnn2D
 │   ├── models/                  architectures (registre, ResNet, MobileNet, AgentNetwork)
@@ -41,7 +42,9 @@ models_spectral/
 │   ├── classique.json           tous les lambda figés : modèle classique (seuls les phi)
 │   └── all_spectral.json        lambda_in entraîné dans toutes les couches
 ├── experiments/
-│   └── serie.sh                 série complète : N runs -> pruning pré et post -> figures
+│   ├── serie.sh                 série complète sur une machine, étape par étape
+│   ├── slurm/                   train.sh, prune.sh, finish.sh : tableaux Slurm écrits à la main
+│   └── exemple.json             série pour plan_experiments.py (plusieurs datasets, cluster)
 ├── notebooks/
 │   ├── analyse_lambda_in.ipynb  pruning d'ordre p en images : masques, exemples, précision (pre)
 │   └── make_notebook.py         génère le notebook (le modifier ici, pas dans le .ipynb)
@@ -211,18 +214,80 @@ probs = agent.predict(test[0])
 Le modèle est reconstruit depuis `config.json` puis ses poids sont rechargés : c'est plus sûr
 qu'un fichier `.keras`, qui dépendrait de la configuration spectrale active au chargement.
 
-## Mémoire
+## Vitesse et mémoire
+
+Une couche dont lambda_in, lambda_out et alpha sont figés à (1, 0, 1) est exactement une
+convolution classique : elle est calculée avec `tf.nn.conv2d` (ou `conv1d`, `depthwise_conv2d`)
+au lieu de la formulation spectrale (`specprune/layers/fast.py`). Avec `configs/spectral_config.json`,
+c'est le cas de 20 couches sur 21 dans ResNet-20. Les résultats sont les mêmes (sorties et
+gradients vérifiés par les tests), et sur CPU un pas d'entraînement est environ 5 fois plus rapide
+pour ResNet-20 sur des images 32x32 (1 382 ms -> 281 ms au batch 128), 8 fois pour MobileNetV2.
+La mémoire des couches spectrales passe d'environ 1 Gio à 120 Mio (ResNet-20, cifar10, batch 128).
+Les runs déjà enregistrés en profitent aussi (pruning, notebook).
 
 Une couche spectrale garde, pour la rétropropagation, les fenêtres de son entrée `X_win`
-(B, O, K, C) : K fois (9 fois en 3x3) l'entrée d'une convolution classique. Pour ResNet-20 sur
-cifar10 avec un batch de 128, cela fait environ 750 Mio pour l'ensemble des couches, et le pic
-d'un pas d'entraînement dépasse 1 Gio : c'est l'ordre de grandeur de l'allocation de 1,26 Gio vue
-sur cifar10. `bench_memory.py` donne le détail par couche et, sur GPU, le pic mesuré selon le batch
-(avec et sans XLA) :
+(B, O, K, C), soit K fois son entrée. `bench_memory.py` donne le détail par couche (colonne
+`calcul` : spectral ou conv) et, sur GPU, le pic mesuré selon le batch :
 
 ```bash
 python bench_memory.py --dataset cifar10 --arch spectral_resnet20 --batch_size 64 128 256
-python bench_memory.py --input_shape 32 32 3 --num_classes 10        # sans charger de données
+```
+
+## Cluster (Slurm) et calcul en parallèle
+
+Une série complète (plusieurs datasets, N graines, pruning pré et post) se décrit dans un fichier
+JSON, puis `plan_experiments.py` la découpe en tâches indépendantes, en quatre étapes :
+
+| étape | une tâche par | GPU |
+|---|---|---|
+| train | (dataset, graine) | oui |
+| prepare | (dataset, pruning) : crée le dossier du pruning | non |
+| prune | pré : (dataset, pruning, run) ; post : (dataset, pruning, run, p, répétition) | oui |
+| finish | dataset : résumés et figures | non |
+
+```bash
+python plan_experiments.py experiments/exemple.json     # écrit jobs/serie1/
+bash jobs/serie1/prefetch.sh                            # télécharge les datasets (nœud de connexion)
+sbatch jobs/serie1/soumission.sh                        # soumet les 4 étapes, chaînées (afterok)
+bash jobs/serie1/run_local.sh 2                         # ou : sur ta machine, 2 tâches à la fois
+```
+
+Exemple : 3 datasets x 5 graines = 15 tâches d'entraînement en même temps ; le post-training de
+5 runs x 11 valeurs de p = 55 réentraînements en même temps par dataset. Chaque étape est un
+tableau de tâches Slurm (`--array`) ; une tâche relancée reprend là où elle s'était arrêtée.
+`"per_gpu": 2` (ou plus) dans `slurm` place plusieurs tâches sur un même GPU, utile pour les
+petits modèles (une RTX 6000 Ada de Lyra a 48 Go). Les lignes `setup` du JSON (modules,
+environnement Python) sont à adapter au cluster ; les journaux vont dans `jobs/<nom>/logs/`.
+
+Sur Lyra (CECI) : Slurm, file `batch`, un GPU par nœud (`--gres=gpu:1`), 5 jours au plus par
+job ; mettre `out_dir` et `pruning_dir` sous `$GLOBALSCRATCH` dans le JSON pour les gros volumes.
+Le module TensorFlow de Lyra (2.15) utilise Keras 2, alors que ce projet demande TensorFlow 2.21
+et Keras 3 : on installe donc un environnement Python une fois, sur le nœud de connexion :
+
+```bash
+module --force purge && ml releases/2023a && ml Python/3.11.3-GCCcore-12.3.0
+python -m venv ~/venvs/spectral && source ~/venvs/spectral/bin/activate
+pip install --upgrade pip && pip install -r requirements_gpu.txt && pip install -e .
+```
+
+Les scripts générés chargent ces mêmes modules et cet environnement (lignes `setup` du JSON).
+
+Ou, sans plan, trois scripts Slurm à éditer directement (grille en tête de chaque script,
+`--array` à mettre à jour), à lancer depuis `models_spectral/` l'un après l'autre :
+
+```bash
+sbatch experiments/slurm/train.sh     # dataset x graine
+sbatch experiments/slurm/prune.sh     # MODE="post" : dataset x run x p ; MODE="pre" : dataset x run
+sbatch experiments/slurm/finish.sh    # résumés et figures, par dataset (sans GPU)
+```
+
+Les mêmes découpages s'utilisent à la main :
+
+```bash
+python run_experiment.py --dataset cifar10 --n_runs 5 --run_name c10 --shard 0/5   # graine 42 seulement
+python pruning.py runs/c10/seed* --mode post --name c10_post --prepare             # crée le dossier
+python pruning.py --resume runs_pruning/c10_post --shard 3/55                      # une part du travail
+python pruning.py --resume runs_pruning/c10_post --finish                          # résumé
 ```
 
 ## Tests

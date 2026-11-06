@@ -73,12 +73,13 @@ import tensorflow as tf
 from .. import FORMAT_VERSION, PROJECT_ROOT
 from ..checks import check_format, runs_differences, spectral_warnings
 from ..data import make_tf_datasets
+from ..layers import set_fast_path
 from ..prune import (CRITERIA, METHODS, PARAMS, apply_masks, evaluate_pruned, freeze_spectral,
                      get_spectral_values, masks_for, select_layers)
 from ..runs import (WEIGHTS_FILE, environment_info, load_run, load_run_data, read_config,
                     test_dataset)
 from ..training import compile_agent, onehot_datasets, recipe_from_run, setup_device
-from .common import add_device, add_verbose, dataset_tag, parser
+from .common import add_verbose, dataset_tag, parse_shard, parser
 
 RESULT_FIELDS = ["run", "mode", "p", "repeat", "seed", "pruned", "total", "fraction_pruned",
                  "test_accuracy", "test_loss", "final_train_accuracy", "epochs", "lr",
@@ -123,10 +124,18 @@ def parse_args(argv=None):
                    help="enregistrer les poids de chaque modèle réentraîné (volumineux)")
 
     g = p.add_argument_group("exécution")
-    add_device(g)
+    g.add_argument("--device", default=None,
+                   help='"/GPU:0" (défaut), "/CPU:0"... ; avec --resume : celui du pruning repris')
     g.add_argument("--gpus", type=int, nargs="+", default=None,
                    help="répartir le travail sur ces GPU (ex. --gpus 0 1) : un processus par GPU")
-    g.add_argument("--shard", default="", help=argparse.SUPPRESS)  # "k/n", posé par --gpus
+    g.add_argument("--shard", default="",
+                   help='"k/n" (avec --resume) : ne faire que la part k sur n du travail. Unité : '
+                        "un run en pré-training, un (run, p, répétition) en post-training. "
+                        "Posé par --gpus, ou une tâche Slurm par part (plan_experiments.py)")
+    g.add_argument("--finish", action="store_true",
+                   help="avec --resume : seulement réunir les résultats des parts (summary.csv), sans GPU")
+    g.add_argument("--prepare", action="store_true",
+                   help="créer le dossier et sa configuration sans rien calculer (avant des --shard)")
     g.add_argument("--allow_mixed", action="store_true",
                    help="accepter des runs non comparables (dataset, architecture, configuration)")
     g.add_argument("--out_dir", default="runs_pruning")
@@ -235,18 +244,24 @@ def evaluate(agent, test_ds):
 def prune_run(args, run_index, run_dir, out_dir, done, rows, path):
     """Pré et/ou post-training pour toutes les valeurs de p d'un run ; ajoute les lignes à rows."""
 
-    def mine(p_index, r=0):
-        """Tâche de ce processus ? (avec --gpus, les (run, p, répétition) sont répartis)"""
+    def mine(p_index, r=0, mode="post"):
+        """
+        Tâche de ce processus ? Avec --shard k/n : en pré-training l'unité est le run (évaluer
+        tous ses p coûte peu, recharger le run coûte plus) ; en post-training, chaque
+        (run, p, répétition) est une unité, réentraînée à part.
+        """
         if not args.shard:
             return True
         k, n = args.shard
+        if mode == "pre":
+            return run_index % n == k
         return ((run_index * len(args.p) + p_index) * args.repeats + r) % n == k
 
     run_name = read_config(run_dir)["run_name"]
     todo = [(m, i, r) for m in (("pre",) if args.mode == "pre" else ("post",) if args.mode == "post"
                                 else ("pre", "post"))
             for i, p in enumerate(args.p) for r in range(args.repeats if m == "post" else 1)
-            if (run_name, m, f"{p:.4f}", r) not in done and mine(i, r)]
+            if (run_name, m, f"{p:.4f}", r) not in done and mine(i, r, m)]
     if not todo:
         print(f"\n=== {run_name} : déjà fait")
         return
@@ -268,9 +283,12 @@ def prune_run(args, run_index, run_dir, out_dir, done, rows, path):
         print(f"  Attention : toutes les valeurs de {args.param} sont égales (poids non entraîné) : "
               "le classement par magnitude est arbitraire.")
     for p, rep in reports.items():
-        if args.shard and args.shard[0] != 0:
-            break  # avec --gpus, seul le premier processus écrit les masques (identiques partout)
-        np.savez_compressed(os.path.join(run_out, "masks", f"p{p:.2f}.npz"), **rep.masks)
+        # masques identiques dans tous les processus (--shard) : écrits une fois, d'un coup
+        target = os.path.join(run_out, "masks", f"p{p:.2f}.npz")
+        if not os.path.exists(target):
+            tmp = f"{target[:-4]}.{os.getpid()}.tmp.npz"
+            np.savez_compressed(tmp, **rep.masks)
+            os.replace(tmp, target)
 
     targs = train_args(args, run_args)
     seed = args.seed if args.seed is not None else run_args.get("seed", 42)
@@ -290,7 +308,7 @@ def prune_run(args, run_index, run_dir, out_dir, done, rows, path):
     if args.mode in ("pre", "both"):
         compile_agent(agent, targs, 1)
         for i, p in enumerate(args.p):
-            if (run_name, "pre", f"{p:.4f}", 0) in done or not mine(i):
+            if (run_name, "pre", f"{p:.4f}", 0) in done or not mine(i, 0, "pre"):
                 continue
             acc, loss = evaluate_pruned(agent, reports[p], original, test_ds)
             record({**base_row("pre", p, 0, reports[p]), "test_accuracy": f"{acc:.4f}",
@@ -380,7 +398,13 @@ def launch_shards(args, out_dir):
 
 def main(argv=None):
     args = parse_args(argv)
-    shard = tuple(int(x) for x in args.shard.split("/")) if args.shard else ()
+    shard = parse_shard(args.shard) if args.shard else ()
+    if shard and not args.resume:
+        sys.exit("--shard s'utilise avec --resume <dossier> (créé avant par --prepare)")
+    if args.finish:
+        if not args.resume:
+            sys.exit("--finish s'utilise avec --resume <dossier>")
+        return finish(args.resume, expected=True)
     saved = None
     if args.resume:
         out_dir = args.resume
@@ -393,7 +417,8 @@ def main(argv=None):
         for key, value in saved["args"].items():
             setattr(args, key, value)
         for key, value in cli.items():
-            setattr(args, key, value)
+            if value is not None:
+                setattr(args, key, value)
     else:
         try:
             configs = [read_config(d) for d in args.run_dirs]
@@ -409,11 +434,13 @@ def main(argv=None):
         os.makedirs(out_dir)
         args.run_dirs = [os.path.abspath(d) for d in args.run_dirs]
     args.shard = shard
+    args.device = args.device or "/GPU:0"
 
     if not shard:  # le processus principal écrit la configuration ; les parties --gpus la relisent
         now = datetime.now().isoformat(timespec="seconds")
         config = {"format_version": FORMAT_VERSION,
-                  "args": {k: v for k, v in vars(args).items() if k not in ("resume", "shard", "gpus")},
+                  "args": {k: v for k, v in vars(args).items()
+                           if k not in ("resume", "shard", "gpus", "prepare")},
                   "runs": [os.path.abspath(d) for d in args.run_dirs],
                   "command": " ".join([os.path.basename(sys.executable)] + sys.argv),
                   "environment": environment_info(tf.config.list_physical_devices("GPU")),
@@ -424,11 +451,16 @@ def main(argv=None):
             config["resumed_at"] = saved.get("resumed_at", []) + [now]
         with open(os.path.join(out_dir, "config.json"), "w") as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
+        if args.prepare:
+            print(f"Préparé : {out_dir}")
+            return
         if args.gpus:
             launch_shards(args, out_dir)
             return finish(out_dir)
 
     setup_device(args.device)
+    if args.layers != "trained":
+        set_fast_path(False)  # des couches aux lambda figés peuvent être élaguées (layers/fast.py)
     path = results_path(out_dir, shard)
     rows = read_results(path)                         # lignes de ce processus
     done = {row_key(r) for r in read_all_results(out_dir)}
@@ -449,8 +481,16 @@ def main(argv=None):
         finish(out_dir)
 
 
-def finish(out_dir):
+def finish(out_dir, expected=False):
     rows = read_all_results(out_dir)
+    if expected:  # toutes les parts ont-elles fini ?
+        with open(os.path.join(out_dir, "config.json")) as f:
+            a = json.load(f)["args"]
+        modes = ["pre", "post"] if a["mode"] == "both" else [a["mode"]]
+        n = len(a["run_dirs"]) * len(a["p"]) * sum(1 if m == "pre" else a["repeats"] for m in modes)
+        if len(rows) < n:
+            print(f"Attention : {len(rows)} lignes sur {n} attendues dans {out_dir} ; relancer les "
+                  f"parts manquantes (même commande, elles reprennent), puis --finish.")
     if not rows:
         return
     summary = summarize(rows, out_dir)

@@ -178,11 +178,21 @@ def compute_masks(agent, p: float, layers: LayerSpec = "trained", param: str = "
     return report
 
 
+def _check_writable(layer) -> None:
+    """Une couche calculée comme une convolution classique ne verrait pas des lambda modifiés."""
+    if getattr(layer, "classic", False):
+        raise ValueError(f"{layer.name} : lambda figés à (1, 0, 1), calculée comme une convolution "
+                         "classique ; pour modifier ses poids spectraux, appeler "
+                         "specprune.layers.set_fast_path(False) avant de construire le modèle "
+                         "(pruning.py le fait avec --layers autre que trained).")
+
+
 def apply_masks(agent, masks: Dict[str, np.ndarray], param: str = "lambda_in",
                 values: Optional[Dict[str, np.ndarray]] = None) -> None:
     """Met à zéro les poids hors masque (sur `values` si donné, sinon sur les poids actuels)."""
     by_name = {l.name: l for l in spectral_layers(agent)}
     for name, mask in masks.items():
+        _check_writable(by_name[name])
         var = _weight(by_name[name], param)
         w = values[name] if values is not None else var.numpy()
         var.assign(np.where(mask, w, 0.0).astype(np.float32))
@@ -215,6 +225,7 @@ def assign_spectral_weights(agent, weights: Dict[str, np.ndarray], param: str = 
     for layer in spectral_layers(agent):
         if layer.name not in weights:
             continue
+        _check_writable(layer)
         var, arr = _weight(layer, param), np.asarray(weights[layer.name], np.float32)
         if arr.shape != tuple(var.shape):
             raise ValueError(f"{layer.name}.{param} : forme {arr.shape} au lieu de {tuple(var.shape)}")

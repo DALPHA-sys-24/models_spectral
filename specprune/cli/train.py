@@ -34,6 +34,10 @@ Plusieurs runs identiques (graines 42 à 46), pour le pruning sur plusieurs grai
     python run_experiment.py --dataset cifar10 --epochs 20 --n_runs 5 --run_name cifar10_5seeds
     -> runs/cifar10_5seeds/seed42/ ... seed46/ ; puis python pruning.py runs/cifar10_5seeds/seed*
 
+Répartir les graines d'un groupe entre plusieurs processus (cluster : une tâche Slurm par graine,
+voir plan_experiments.py) : la tâche k sur n entraîne les graines d'indice k, k+n, k+2n...
+    python run_experiment.py --dataset cifar10 --n_runs 5 --run_name cifar10_x5 --shard 0/5
+
 Reprendre un entraînement interrompu (coupure, erreur mémoire...) à la dernière epoch terminée :
     python run_experiment.py --resume runs/<run>
     python run_experiment.py --resume runs/cifar10_5seeds        # les runs non terminés du groupe
@@ -74,8 +78,8 @@ from ..models import (AgentNetwork, available_models, configure_spectral, get_sp
 from ..runs import (WEIGHTS_FILE, LambdaInSnapshot, append_summary, environment_info,
                     lambda_in_file, lambda_in_layers, save_lambda_in, spectral_layers)
 from ..training import compile_agent, onehot_datasets, setup_device
-from .common import (DEFAULT_SPECTRAL_CONFIG, add_device, add_verbose, dataset_tag, parser,
-                     resolve_spectral_config)
+from .common import (DEFAULT_SPECTRAL_CONFIG, add_device, add_verbose, dataset_tag, parse_shard,
+                     parser, resolve_spectral_config)
 
 BACKUP_DIR = "backup"
 GROUP_FILE = "group.json"
@@ -139,6 +143,9 @@ def build_parser():
     g.add_argument("--n_runs", type=int, default=1,
                    help="nombre de runs identiques (graines seed, seed+1, ...), rangés dans "
                         "<out_dir>/<run_name ou dataset_arch_date_xN>/seed<k>/")
+    g.add_argument("--shard", default="",
+                   help='"k/n" : avec --n_runs, n\'entraîner que les graines d\'indice k, k+n... '
+                        "(un processus ou une tâche Slurm par part)")
     g.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=False,
                    help="opérations déterministes (résultats identiques d'un run à l'autre, plus lent)")
     g.add_argument("--out_dir", default="runs")
@@ -156,7 +163,7 @@ def parse_args(argv=None):
         with open(args.from_config) as f:
             saved = json.load(f)
         defaults = {k: v for k, v in saved["args"].items()
-                    if k not in ("from_config", "run_name", "n_runs", "resume")}
+                    if k not in ("from_config", "run_name", "n_runs", "resume", "shard")}
         # La configuration spectrale est relue depuis la copie faite dans le dossier du run.
         copy_path = os.path.join(os.path.dirname(os.path.abspath(args.from_config)),
                                  "spectral_config.json")
@@ -183,11 +190,20 @@ def main(argv=None):
     group_dir = os.path.join(args.out_dir, group)
     seeds = [args.seed + k for k in range(args.n_runs)]
     os.makedirs(group_dir, exist_ok=True)
-    with open(os.path.join(group_dir, GROUP_FILE), "w") as f:  # pour --resume du groupe
+    # pour --resume du groupe ; écrit par chaque part (--shard) avec le même contenu, d'un coup
+    tmp = os.path.join(group_dir, f".{GROUP_FILE}.{os.getpid()}")
+    with open(tmp, "w") as f:
         json.dump({"format_version": FORMAT_VERSION, "seeds": seeds,
-                   "args": {**vars(args), "n_runs": 1}}, f, indent=2, ensure_ascii=False)
-    print(f"{args.n_runs} runs dans {group_dir} (graines {seeds})")
-    run_group(args, group_dir, seeds, gpus)
+                   "args": {**{k: v for k, v in vars(args).items() if k != "shard"}, "n_runs": 1}},
+                  f, indent=2, ensure_ascii=False)
+    os.replace(tmp, os.path.join(group_dir, GROUP_FILE))
+    mine = seeds
+    if args.shard:
+        k, n = parse_shard(args.shard)
+        mine = seeds[k::n]
+    print(f"{args.n_runs} runs dans {group_dir} (graines {seeds})"
+          + (f" ; cette part ({args.shard}) : {mine}" if args.shard else ""))
+    run_group(args, group_dir, seeds, gpus, done=[f"seed{s}" for s in seeds if s not in mine])
 
 
 def run_group(args, group_dir, seeds, gpus, done=()):
@@ -196,7 +212,18 @@ def run_group(args, group_dir, seeds, gpus, done=()):
         if name in done:
             continue
         print(f"\n=== run {k + 1}/{len(seeds)} : graine {seed}")
-        one = argparse.Namespace(**{**vars(args), "seed": seed, "n_runs": 1, "resume": "",
+        run_dir = os.path.join(group_dir, name)
+        # relance d'une tâche (cluster) : run terminé sauté, run commencé repris, dossier vide refait
+        if _finished(run_dir):
+            print(f"{run_dir} est déjà terminé.")
+            continue
+        if os.path.isdir(os.path.join(run_dir, BACKUP_DIR)):
+            resume_run(run_dir, args, gpus)
+            tf.keras.backend.clear_session()
+            continue
+        if os.path.isdir(run_dir):
+            shutil.rmtree(run_dir)  # interrompu avant la fin de la première epoch
+        one = argparse.Namespace(**{**vars(args), "seed": seed, "n_runs": 1, "resume": "", "shard": "",
                                     "out_dir": group_dir, "run_name": name})
         run(one, gpus)
         tf.keras.backend.clear_session()

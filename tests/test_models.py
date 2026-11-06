@@ -85,3 +85,46 @@ def test_resnet20(mode, shape):
 @pytest.mark.parametrize("shape", [(32, 32, 3), (28, 28, 1), (128, 3), (100, 1)])
 def test_all_models(mode, name, shape):
     _check_model(mode, name, shape)
+
+
+@pytest.mark.parametrize("shape,arch", [((16, 16, 3), "spectral_resnet20"), ((40, 2), "spectral_resnet20"),
+                                        ((16, 16, 3), "spectral_mobilenetv2")])
+def test_fast_path_same_as_spectral(shape, arch):
+    """Couches aux lambda figés à (1, 0, 1) : la convolution classique donne la même sortie et le même gradient."""
+    from specprune.layers import set_fast_path
+    from specprune.runs import spectral_layers
+
+    def build(fast):
+        set_fast_path(fast)
+        configure_spectral(os.path.join(CONFIGS_DIR, "spectral_config.json"))
+        agent = AgentNetwork(arch=arch, num_classes=10)
+        agent(tf.zeros((1,) + shape))
+        return agent
+
+    try:
+        slow, fast = build(False), build(True)
+    finally:
+        set_fast_path(True)
+    fast.set_weights(slow.get_weights())
+    assert not any(l.classic for l in spectral_layers(slow))
+    assert any(l.classic for l in spectral_layers(fast)) and not spectral_layers(fast)[0].classic
+    x, y = tf.random.normal((4,) + shape), tf.constant([0, 1, 2, 3])
+    grads = []
+    for agent in (slow, fast):
+        with tf.GradientTape() as tape:
+            loss = tf.keras.losses.sparse_categorical_crossentropy(y, agent(x, training=True))
+        grads.append(tape.gradient(loss, agent.trainable_variables))
+    assert float(tf.reduce_max(tf.abs(slow(x) - fast(x)))) < TOL
+    for a, b in zip(*grads):
+        assert float(tf.reduce_max(tf.abs(a - b))) < 1e-3
+
+
+def test_fast_path_refuses_lambda_writes():
+    from specprune.prune import apply_masks
+    from specprune.runs import spectral_layers
+    configure_spectral(os.path.join(CONFIGS_DIR, "spectral_config.json"))
+    agent = AgentNetwork(arch="spectral_resnet20", num_classes=10)
+    agent(tf.zeros((1, 16, 16, 3)))
+    layer = spectral_layers(agent)[1]
+    with pytest.raises(ValueError, match="convolution classique"):
+        apply_masks(agent, {layer.name: np.zeros(layer.lambda_in.shape, bool)})

@@ -9,6 +9,7 @@ Depends on spectral_conv_op.py for all tensor operations.
 import tensorflow as tf
 from tensorflow.keras import layers, initializers, activations, regularizers
 
+from .fast import classic_conv_1d, classic_conv_2d, refresh_classic
 from .spectral_conv_op import (
     compute_conv_dims_1d,
     spectral_conv_1d,
@@ -275,6 +276,7 @@ class SpecCnn1D(layers.Layer):
         else:
             self.bias = None
 
+        refresh_classic(self)  # lambda figés à (1, 0, 1) : convolution classique (fast.py)
         super().build(input_shape)
 
     # --------------------------------------------------------------------------
@@ -293,7 +295,10 @@ class SpecCnn1D(layers.Layer):
         -------
         Y : tf.Tensor, (batch, O, F)
         """
-        Y = spectral_conv_1d(
+        if getattr(self, "classic", False):
+            Y = classic_conv_1d(X, self.phi_weights, self._S, self._P, self.groups)
+        else:
+          Y = spectral_conv_1d(
             X           = X,
             phi_weights = self.phi_weights,
             lambda_in   = self.lambda_in,

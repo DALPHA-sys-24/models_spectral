@@ -25,6 +25,7 @@ specprune-search = "specprune.cli.search:main"
 specprune-prune = "specprune.cli.prune:main"
 specprune-plot = "specprune.cli.plot:main"
 specprune-bench = "specprune.cli.bench:main"
+specprune-plan = "specprune.cli.plan:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "specprune.__version__" }

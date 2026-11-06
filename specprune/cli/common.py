@@ -46,3 +46,14 @@ def resolve_spectral_config(path: str) -> str:
 def dataset_tag(name: str) -> str:
     """Nom de dataset utilisable dans un nom de dossier (tfds:x/y -> x_y, ucr:Nom -> ucr_Nom)."""
     return name.replace("tfds:", "").replace(":", "_").replace("/", "_")
+
+
+def parse_shard(text: str):
+    """"k/n" -> (k, n), avec 0 <= k < n."""
+    try:
+        k, n = (int(x) for x in text.split("/"))
+    except ValueError:
+        sys.exit(f'--shard {text} : attendu "k/n", par exemple 0/4')
+    if not 0 <= k < n:
+        sys.exit(f"--shard {text} : il faut 0 <= k < n")
+    return k, n

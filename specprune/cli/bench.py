@@ -4,6 +4,8 @@ d'entraînement selon la taille du batch (pour choisir --batch_size avant de lan
 
 Par couche (calcul exact à partir des formes, en float32) :
     params      phi, lambda_in, lambda_out, alpha (et leurs moments dans l'optimiseur)
+    calcul      spectral, ou conv : lambda figés à (1, 0, 1), calculée comme une convolution
+                classique (aucun W ni X_win, voir specprune/layers/fast.py)
     W           poids effectif alpha*phi*(lambda_in - lambda_out), forme (F, Cg, O, K) :
                 ne dépend pas du batch, recalculé à chaque pas
     X_win       fenêtres de l'entrée, forme (B, O, K, C) : K fois l'entrée de la couche,
@@ -87,9 +89,12 @@ def layer_table(agent, batch):
         C, O = l._C, l._O
         params = sum(int(np.prod(w.shape)) for w in (l.phi_weights, l.lambda_in, l.lambda_out, l.alpha))
         trainable = sum(int(np.prod(w.shape)) for w in l.trainable_weights)
-        rows.append({"index": i, "layer": l.name, "F": F, "C": C, "groups": l.groups, "O": O, "K": K,
+        classic = getattr(l, "classic", False)  # convolution classique : ni W ni X_win (fast.py)
+        rows.append({"index": i, "layer": l.name, "path": "conv" if classic else "spectral",
+                     "F": F, "C": C, "groups": l.groups, "O": O, "K": K,
                      "params": params * BYTES, "trainable": trainable * BYTES,
-                     "W": F * Cg * O * K * BYTES, "X_win": batch * O * K * C * BYTES,
+                     "W": 0 if classic else F * Cg * O * K * BYTES,
+                     "X_win": 0 if classic else batch * O * K * C * BYTES,
                      "output": batch * O * F * BYTES})
     return rows
 
@@ -103,19 +108,21 @@ def human(n):
 
 def print_table(rows, batch):
     print(f"\nPar couche, batch {batch} (float32) :")
-    print(f"{'#':>3} {'couche':<22} {'F':>4} {'C':>4} {'G':>3} {'O':>6} {'K':>3} "
+    print(f"{'#':>3} {'couche':<22} {'calcul':>8} {'F':>4} {'C':>4} {'G':>3} {'O':>6} {'K':>3} "
           f"{'params':>10} {'W':>10} {'X_win':>10} {'sortie':>10}")
     for r in rows:
-        print(f"{r['index']:>3} {r['layer'][:22]:<22} {r['F']:>4} {r['C']:>4} {r['groups']:>3} {r['O']:>6} "
+        print(f"{r['index']:>3} {r['layer'][:22]:<22} {r['path']:>8} {r['F']:>4} {r['C']:>4} {r['groups']:>3} {r['O']:>6} "
               f"{r['K']:>3} {human(r['params']):>10} {human(r['W']):>10} {human(r['X_win']):>10} "
               f"{human(r['output']):>10}")
     tot = {k: sum(r[k] for r in rows) for k in ("params", "trainable", "W", "X_win", "output")}
-    print(f"    {'total':<22} {'':>24} {human(tot['params']):>10} {human(tot['W']):>10} "
+    print(f"    {'total':<22} {'':>33} {human(tot['params']):>10} {human(tot['W']):>10} "
           f"{human(tot['X_win']):>10} {human(tot['output']):>10}")
     # gardé pour la rétropropagation : X_win et sortie de chaque couche, W de chaque couche ;
     # poids entraînés : valeur + gradient + 2 moments (AdamW) au plus
     estimate = tot["X_win"] + tot["output"] + tot["W"] + 4 * tot["trainable"]
     print(f"Estimation basse du pic d'un pas d'entraînement (couches spectrales seules) : {human(estimate)}")
+    if not tot["X_win"]:
+        return tot
     biggest = max(rows, key=lambda r: r["X_win"])
     print(f"Plus gros X_win : {biggest['layer']} ({human(biggest['X_win'])}) ; "
           f"plus gros W : {max(rows, key=lambda r: r['W'])['layer']} ({human(max(r['W'] for r in rows))})")

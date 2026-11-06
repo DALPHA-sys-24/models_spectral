@@ -23,7 +23,7 @@ import numpy as np
 import tensorflow as tf
 
 from .models import AgentNetwork, configure_spectral
-from .layers import SpecCnn1D, SpecCnn2D
+from .layers import SpecCnn1D, SpecCnn2D, refresh_classic
 
 from .checks import check_format
 from .data import load_dataset
@@ -166,6 +166,8 @@ def load_run(run_dir: str, weights: bool = True) -> Tuple[object, Dict]:
         if not os.path.exists(path):
             raise FileNotFoundError(f"{path} introuvable : le run a été lancé avec --no-save_weights")
         agent.load_weights(path)
+        for layer in spectral_layers(agent):  # valeurs rechargées : chemin rapide encore valable ?
+            refresh_classic(layer)
     return agent, config
 
 

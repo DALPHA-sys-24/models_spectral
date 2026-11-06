@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from specprune.cli import bench, plot, prune, train
+from specprune.cli import bench, plan, plot, prune, train
 
 ARCH = "spectral_resnet20"
 # lambda_in entraîné dans les deux premières couches seulement, lambda_out figé
@@ -172,3 +172,52 @@ def test_bench(workspace, capsys):
     bench.main(["--input_shape", *map(str, shape), "--num_classes", "3", "--batch_size", "16",
                 "--device", "/CPU:0", "--spectral_config", workspace["config"]])
     assert "X_win" in capsys.readouterr().out
+
+
+def test_train_shard(workspace):
+    """--shard k/n : chaque part n'entraîne que ses graines, dans le même groupe."""
+    out = str(workspace["root"] / "runs_shard")
+    argv = train_argv(workspace["data"], workspace["config"], out, "--epochs", "1", "--n_runs", "3",
+                      "--run_name", "g")
+    train.main(argv + ["--shard", "1/2"])                # graine 43 seulement
+    group = workspace["root"] / "runs_shard" / "g"
+    assert sorted(p.name for p in group.glob("seed*")) == ["seed43"]
+    train.main(argv + ["--shard", "0/2"])                # graines 42 et 44
+    assert sorted(p.name for p in group.glob("seed*")) == ["seed42", "seed43", "seed44"]
+    train.main(argv + ["--shard", "0/2"])                # relance : rien à refaire
+    assert len(read_csv(group / "runs_summary.csv")) == 3
+
+
+def test_prune_prepare_shards_finish(workspace):
+    """--prepare puis une part par (run, p) en post-training, puis --finish : ce que fait le plan Slurm."""
+    out = workspace["root"] / "pruning" / "planned"
+    prune.main(prune_argv(workspace, "planned", "--mode", "post", "--prepare"))
+    assert (out / "config.json").exists() and not list(out.glob("results*.csv"))
+    n = 2 * 3
+    for k in range(n):
+        prune.main(["--resume", str(out), "--shard", f"{k}/{n}"])   # périphérique repris du dossier
+    assert len(read_csv(out / f"results_part{n - 1}.csv")) == 1
+    prune.main(["--resume", str(out), "--finish"])
+    assert all(int(s["n"]) == 2 for s in read_csv(out / "summary.csv"))
+    for run in ("seed1", "seed2"):
+        assert len(list((out / run / "masks").glob("p*.npz"))) == 3
+
+
+def test_plan(tmp_path):
+    spec = {"name": "s", "datasets": ["mnist", "ucr:GunPoint"], "n_runs": 3,
+            "train": {"epochs": 2, "nesterov": False},
+            "pruning": [{"mode": "pre"}, {"mode": "post", "method": "mixte", "repeats": 2}],
+            "p": [0, 0.5], "slurm": {"per_gpu": 2}}
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(spec))
+    plan.main([str(path), "--jobs_dir", str(tmp_path / "jobs")])
+    here = tmp_path / "jobs" / "s"
+    lines = {s: (here / f"{s}.tasks").read_text().splitlines() for s in plan.STAGES}
+    assert len(lines["train"]) == 2 * 3 and "--no-nesterov" in lines["train"][0]
+    assert lines["train"][1].endswith("--shard 1/3")
+    assert len(lines["prepare"]) == 2 * 2
+    assert len(lines["prune"]) == 2 * (3 + 3 * 2 * 2)       # pré : un par run ; post : run x p x répétition
+    assert len(lines["finish"]) == 2
+    assert "#SBATCH --array=0-14" in (here / "slurm_prune.sh").read_text()   # 30 tâches, 2 par GPU
+    assert "--gres=gpu:1" in (here / "slurm_train.sh").read_text()
+    assert "--gres=gpu" not in (here / "slurm_finish.sh").read_text()

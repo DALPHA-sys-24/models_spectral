@@ -1,0 +1,39 @@
+{
+  "name": "serie1",
+  "datasets": ["mnist", "fashion_mnist", "cifar10"],
+  "n_runs": 5,
+  "seed": 42,
+  "train": {
+    "arch": "spectral_resnet20",
+    "spectral_config": "configs/spectral_config.json",
+    "epochs": 20,
+    "lr": 0.1,
+    "batch_size": 128,
+    "verbose": 2
+  },
+  "per_dataset": {
+    "mnist1d": {"epochs": 100}
+  },
+  "pruning": [
+    {"mode": "pre", "method": "element"},
+    {"mode": "post", "method": "element", "epochs": 20}
+  ],
+  "p": [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
+  "chance": 0.1,
+  "slurm": {
+    "partition": "batch",
+    "gpus": 1,
+    "cpus_per_task": 8,
+    "mem": "32G",
+    "per_gpu": 1,
+    "time": {"train": "1-00:00:00", "prune": "12:00:00"},
+    "setup": [
+      "module --force purge",
+      "ml releases/2023a",
+      "ml Python/3.11.3-GCCcore-12.3.0",
+      "source ~/venvs/spectral/bin/activate",
+      "export TF_GPU_ALLOCATOR=cuda_malloc_async",
+      "export TF_CPP_MIN_LOG_LEVEL=2"
+    ]
+  }
+}

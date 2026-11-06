@@ -41,6 +41,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers, initializers, activations, regularizers
 
+from .fast import classic_conv_1d, classic_conv_2d, refresh_classic
 from .spectral_conv_op import (
     compute_conv_dims_2d,
     spectral_conv_2d,
@@ -337,6 +338,7 @@ class SpecCnn2D(layers.Layer):
         # Ph, Pw, Sh, Sw stored for call() — no sparse indices or pad matrix.
         #
 
+        refresh_classic(self)  # lambda figés à (1, 0, 1) : convolution classique (fast.py)
         super().build(input_shape)
 
     # --------------------------------------------------------------------------
@@ -354,7 +356,11 @@ class SpecCnn2D(layers.Layer):
         -------
         Y : tf.Tensor, (B, Oh, Ow, F)
         """
-        Y = spectral_conv_2d(
+        if getattr(self, "classic", False):
+            Y = classic_conv_2d(X, self.phi_weights, self._Sh, self._Sw, self._Ph, self._Pw,
+                                self.groups)
+        else:
+          Y = spectral_conv_2d(
             X           = X,
             phi_weights = self.phi_weights,
             lambda_in   = self.lambda_in,
