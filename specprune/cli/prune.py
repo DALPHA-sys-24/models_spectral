@@ -64,7 +64,6 @@ import shutil
 import subprocess
 import sys
 import time
-import warnings
 from datetime import datetime
 
 import numpy as np
@@ -75,7 +74,7 @@ from ..checks import check_format, runs_differences, spectral_warnings
 from ..data import make_tf_datasets
 from ..layers import set_fast_path
 from ..prune import (CRITERIA, METHODS, PARAMS, apply_masks, evaluate_pruned, freeze_spectral,
-                     get_spectral_values, masks_for, select_layers)
+                     get_spectral_values, masks_for, save_weights, select_layers)
 from ..runs import (WEIGHTS_FILE, environment_info, load_run, load_run_data, read_config,
                     test_dataset)
 from ..training import compile_agent, onehot_datasets, recipe_from_run, setup_device
@@ -330,18 +329,19 @@ def prune_run(args, run_index, run_dir, out_dir, done, rows, path):
         # Un seul modèle pour tous les p : on recharge ses poids entraînés à chaque p (créer un
         # modèle par p fait grossir la mémoire du GPU jusqu'à l'erreur « Out of memory »).
         agent, _ = load_run(run_dir)
+        # valeurs entraînées gardées en mémoire, remises à chaque p (par variable : ne dépend pas
+        # de l'ordre des poids, que freeze_spectral change sous Keras 2)
+        trained = [(v, v.numpy()) for v in agent.weights]
         counts = freeze_spectral(agent, args.train)
         compile_agent(agent, targs, steps)
         reset_optimizer = optimizer_reset(agent)
-        weights_path = os.path.join(run_dir, WEIGHTS_FILE)
         for i, p in enumerate(args.p):
             for r in range(args.repeats):
                 if (run_name, "post", f"{p:.4f}", r) in done or not mine(i, r):
                     continue
                 tf.keras.utils.set_random_seed(seed + r)
-                with warnings.catch_warnings():           # modèle entraîné du run ; l'état de
-                    warnings.simplefilter("ignore")       # son optimiseur ne sert pas (remis à zéro)
-                    agent.load_weights(weights_path)
+                for var, value in trained:                # modèle entraîné du run
+                    var.assign(value)
                 apply_masks(agent, reports[p].masks, args.param)
                 reset_optimizer()                         # momentum et schedule repartent de zéro
                 folder = os.path.join(run_out, "post", f"p{p:.2f}_r{r}")
@@ -361,7 +361,7 @@ def prune_run(args, run_index, run_dir, out_dir, done, rows, path):
                 pruned_values = get_spectral_values(agent, args.param, list(reports[p].masks))
                 assert all(np.all(v[~reports[p].masks[k]] == 0) for k, v in pruned_values.items())
                 if args.save_weights:
-                    agent.save_weights(os.path.join(folder, WEIGHTS_FILE))
+                    save_weights(agent, os.path.join(folder, WEIGHTS_FILE))  # ordre d'origine (Keras 2)
                 record({**base_row("post", p, r, reports[p]), "seed": seed + r,
                         "test_accuracy": f"{acc:.4f}", "test_loss": f"{loss:.4f}",
                         "final_train_accuracy": f"{history.history['accuracy'][-1]:.4f}",

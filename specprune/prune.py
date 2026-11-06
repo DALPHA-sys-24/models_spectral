@@ -23,6 +23,7 @@ Critère : "percentile" (défaut) met à zéro les scores < percentile d'ordre p
 retiré) ; "rank" retire exactement round(p * n) scores, les plus petits (identique sauf ex aequo).
 """
 from dataclasses import dataclass, field
+import weakref
 from typing import Dict, List, Optional, Sequence, Union
 
 import keras
@@ -238,6 +239,68 @@ def assign_spectral_weights(agent, weights: Dict[str, np.ndarray], param: str = 
     return n
 
 
+# Keras 2 : ordre des listes de poids de chaque couche avant freeze_spectral (save_weights les lit)
+_ORDER_BEFORE_FREEZE = weakref.WeakKeyDictionary()
+
+
+def _weight_lists(agent):
+    """Couches Keras 2 (listes _trainable_weights) ; vide sous Keras 3."""
+    return [l for l in agent._backbone.layers if hasattr(l, "_trainable_weights")]
+
+
+def _order(layers):
+    return [(l, list(l._trainable_weights), list(l._non_trainable_weights)) for l in layers]
+
+
+def _put_order(state):
+    for l, tw, ntw in state:
+        for lst, values in ((l._trainable_weights, tw), (l._non_trainable_weights, ntw)):
+            del lst[:]
+            lst.extend(values)
+
+
+def save_weights(agent, path: str) -> None:
+    """
+    agent.save_weights, avec l'ordre des poids d'avant freeze_spectral : sous Keras 2, les poids
+    sont enregistrés dans l'ordre des listes de chaque couche, que freeze_spectral change ; le
+    fichier se relit alors avec load_run comme un run ordinaire.
+    """
+    before = _ORDER_BEFORE_FREEZE.get(agent)
+    if not before:
+        agent.save_weights(path)
+        return
+    frozen = _order([l for l, _, _ in before])
+    _put_order(before)
+    try:
+        agent.save_weights(path)
+    finally:
+        _put_order(frozen)
+
+
+def set_trainable(layer, var, trainable: bool) -> None:
+    """
+    Rend une variable d'une couche entraînable ou non.
+
+    Keras 3 (TensorFlow >= 2.16) : attribut trainable de la variable. Keras 2 (TensorFlow 2.15,
+    module de Lyra) : une variable tf.Variable ne change pas d'état ; on la déplace entre les
+    listes de poids entraînables et figés de sa couche, ce que lisent fit() et l'optimiseur.
+    """
+    try:
+        var.trainable = trainable
+        return
+    except AttributeError:
+        pass
+    src, dst = ((layer._non_trainable_weights, layer._trainable_weights) if trainable
+                else (layer._trainable_weights, layer._non_trainable_weights))
+    for i, v in enumerate(src):
+        if v is var:
+            del src[i]
+            dst.append(var)
+            return
+    if not any(v is var for v in dst):
+        raise ValueError(f"{var.name} n'appartient pas à la couche {layer.name}")
+
+
 def freeze_spectral(agent, train: str = "phi") -> Dict[str, int]:
     """
     Fige lambda_in, lambda_out et alpha de toutes les couches spectrales (post-training).
@@ -251,6 +314,8 @@ def freeze_spectral(agent, train: str = "phi") -> Dict[str, int]:
     if train not in ("phi", "non_spectral"):
         raise ValueError(f"train doit être 'phi' ou 'non_spectral', reçu '{train}'")
     spec = spectral_layers(agent)
+    if agent not in _ORDER_BEFORE_FREEZE:
+        _ORDER_BEFORE_FREEZE[agent] = _order(_weight_lists(agent))
     if train == "phi":
         # Dense, etc. : figés. BatchNorm : gamma et beta figés, mais la couche reste en mode
         # entraînement (normalisation par les statistiques du batch, moyennes mobiles mises à
@@ -263,17 +328,17 @@ def freeze_spectral(agent, train: str = "phi") -> Dict[str, int]:
             if isinstance(layer, keras.layers.BatchNormalization):
                 for var in (layer.gamma, layer.beta):
                     if var is not None:
-                        var.trainable = False
+                        set_trainable(layer, var, False)
             else:
                 layer.trainable = False
         for layer in (agent._logits,):
             layer.trainable = False
     for layer in spec:
-        layer.phi_weights.trainable = True
+        set_trainable(layer, layer.phi_weights, True)
         for name in PARAMS:
-            getattr(layer, name).trainable = False
+            set_trainable(layer, getattr(layer, name), False)
         if layer.use_bias and train == "phi":
-            layer.bias.trainable = False
+            set_trainable(layer, layer.bias, False)
     trainable = int(sum(np.prod(v.shape) for v in agent.trainable_variables))
     frozen = int(sum(np.prod(v.shape) for v in agent.non_trainable_variables))
     return {"trainable": trainable, "frozen": frozen}

@@ -53,8 +53,15 @@ DEVICE = "/GPU:0"            # "/CPU:0" sans GPU
 
 # Figures
 STAT, BAND = "median", "quantile"    # médiane et bande 5-95 % ("mean" / "std" possibles)
-HIST_BINS = 60
-HIST_YSCALE = "linear"       # "linear" ou "log" (distribution des lambda_in)
+# Distribution des lambda_in
+HIST_BINS = 40
+HIST_STYLE = "points"        # "points" (médiane + barres 5-95 %) ou "line" (ligne + bande)
+HIST_NORMALIZE = False       # True = densité divisée par son maximum (pic = 1)
+HIST_SOURCE = "runs"         # "runs" : histogramme de chaque run, puis médiane (et bande) par classe
+                             # "median" : histogramme de la médiane des lambda_in sur les runs (élément par élément)
+HIST_YSCALE = "linear"       # "linear" ou "log"
+HIST_SIZE_MM = (120, 75)     # largeur, hauteur de la figure de distribution
+DISPLAY_DPI = 150            # taille d'affichage dans le notebook (sans effet sur les fichiers enregistrés)
 WIDTH_MM = 183               # 89 = une colonne, 183 = deux colonnes
 FORMATS = ["pdf", "png"]
 DPI = 600
@@ -106,6 +113,7 @@ def figure(height_mm, nrows=1, ncols=1, width_mm=None, **kw):
     """Figure au style de l'article (largeur WIDTH_MM, hauteur en mm)."""
     style.apply()
     plt.rcParams["mathtext.default"] = "regular"   # lambda dans la police du texte
+    plt.rcParams["figure.dpi"] = DISPLAY_DPI       # affichage plus grand ; fichiers : DPI
     return plt.subplots(nrows, ncols, figsize=((width_mm or style.width_mm) * MM, height_mm * MM), **kw)
 
 
@@ -203,7 +211,7 @@ print(f"Dataset  : {info.name} ({info.modality}) {info.input_shape}, {info.num_c
 for name, c in zip(RUN_NAMES, configs):
     print(f"  {name:<12} graine {c['args'].get('seed')}  précision test {c.get('test_accuracy', float('nan')):.4f}")'''))
 
-cells.append(md("## 2. Distribution des `lambda_in`\n\nPour chaque run : histogramme (densité) des valeurs brutes de `lambda_in` de la couche montrée, positions de padding retirées, sur des classes communes à tous les runs. La courbe est la médiane des runs, la bande va du quantile 5 % au quantile 95 %. Orange : tous les filtres et tous les canaux ; bleu : le filtre `FILTER` seul (tous ses canaux)."))
+cells.append(md("## 2. Distribution des `lambda_in`\n\nPour chaque run : histogramme (densité) des valeurs brutes de `lambda_in` de la couche montrée, positions de padding retirées, sur des classes communes à tous les runs. Les points sont la médiane des runs dans chaque classe, les barres vont du quantile 5 % au quantile 95 % (`HIST_STYLE = \"line\"` : ligne et bande). Densité brute par défaut (`HIST_NORMALIZE = True` : divisée par son maximum, pic = 1). `HIST_SOURCE = \"median\"` trace plutôt l'histogramme de la médiane des `lambda_in` sur les runs. Une seule densité : tous les `lambda_in` de la couche, sur tous les filtres et tous les canaux."))
 cells.append(code(r'''targets = select_layers(agents[0], LAYERS, "lambda_in")
 spec = spectral_layers(agents[0])
 # indices de convolution : les noms Keras des couches changent d'un modèle chargé à l'autre
@@ -237,25 +245,46 @@ def to_input_grid(a, layer):
 # valeurs de la couche montrée dans chaque run : (runs, F, C/groups, L)
 LAM = np.stack([spectral_layers(a)[conv_index].lambda_in.numpy() for a in agents])
 VALID = valid_positions(layer)
-samples_all = [v[VALID] for v in LAM]
-samples_filter = [v[FILTER][VALID[FILTER]] for v in LAM]
+# HIST_SOURCE = "median" : une seule série, la médiane des runs élément par élément (pas de bande)
+SRC = np.median(LAM, axis=0, keepdims=True) if HIST_SOURCE == "median" else LAM
+samples_all = [v[VALID] for v in SRC]
+samples_filter = [v[FILTER][VALID[FILTER]] for v in SRC]
 lo, hi = min(s.min() for s in samples_all), max(s.max() for s in samples_all)
 bins = np.linspace(lo, hi + 1e-12, HIST_BINS + 1)
 centers = (bins[:-1] + bins[1:]) / 2
 
-fig, ax = figure(58, width_mm=89)
-def density(s):
-    d = np.histogram(s, bins, density=True)[0]
+def densities(samples):
+    """Densité de chaque run (runs, classes), divisée par le maximum de la médiane si HIST_NORMALIZE."""
+    d = np.stack([np.histogram(s, bins, density=True)[0] for s in samples])
+    if HIST_NORMALIZE:
+        d = d / max((np.median(d, 0) if STAT == "median" else d.mean(0)).max(), 1e-12)
     return np.where(d > 0, d, np.nan) if HIST_YSCALE == "log" else d   # échelle log : classes vides retirées
 
 
-band(ax, centers, [density(s) for s in samples_all], COLORS[0], "All filters and channels")
-band(ax, centers, [density(s) for s in samples_filter], COLORS[1], f"Filter {FILTER}")
+def points(ax, x, d, color, label, marker):
+    """Médiane des runs en points, quantiles 5-95 % en barres verticales (si plusieurs runs)."""
+    center = np.nanmedian(d, 0) if STAT == "median" else np.nanmean(d, 0)
+    err = None
+    if len(d) > 1 and BAND != "none":
+        lo_, hi_ = ((np.nanquantile(d, 0.05, 0), np.nanquantile(d, 0.95, 0)) if BAND == "quantile"
+                    else (center - np.nanstd(d, 0), center + np.nanstd(d, 0)))
+        err = [center - lo_, hi_ - center]
+    ax.errorbar(x, center, yerr=err, fmt=marker, color=color, label=label, ms=style.marker_size + 0.5,
+                mec="white", mew=0.4, elinewidth=0.7, capsize=0, alpha=0.95)
+
+
+fig, ax = figure(HIST_SIZE_MM[1], width_mm=HIST_SIZE_MM[0])
+# une seule densité : tous les lambda_in de la couche (tous les filtres et tous les canaux)
+d = densities(samples_all)
+if HIST_STYLE == "points":
+    points(ax, centers, d, COLORS[1], "All filters and channels", "o")
+else:
+    band(ax, centers, list(d), COLORS[1], "All filters and channels")
 ax.set_yscale(HIST_YSCALE)
 ax.set_xlabel(LAMBDA)
-ax.set_ylabel("Density")
-ax.set_ylim(bottom=None if HIST_YSCALE == "log" else 0)
-ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, handlelength=1.8)
+ax.set_ylabel("Normalized density" if HIST_NORMALIZE else "Density")
+if HIST_YSCALE != "log":
+    ax.set_ylim(0, 1.08 if HIST_NORMALIZE else None)
 publish(fig, "lambda_in_distribution")
 
 for label, s in (("tous les filtres", samples_all), (f"filtre {FILTER}", samples_filter)):
@@ -263,28 +292,21 @@ for label, s in (("tous les filtres", samples_all), (f"filtre {FILTER}", samples
     print(f"{label:>16} : médiane des runs de (q5, médiane, q95) = {np.median(q, 0)} ; "
           f"part |lambda_in| < 1e-3 : {np.median([np.mean(np.abs(x) < 1e-3) for x in s]):.1%}")'''))
 
-cells.append(md("### Position par position\n\nImportance d'une position d'entrée (pixel ou instant) = moyenne de |`lambda_in`| sur les filtres et les canaux (à gauche, ou en orange pour un signal), ou sur les canaux du filtre `FILTER` (à droite, ou en bleu). Images : médiane des runs ; signaux : médiane et bande 5 à 95 %."))
+cells.append(md("### Position par position\n\nImportance d'une position d'entrée (pixel ou instant) = moyenne de |`lambda_in`| sur tous les filtres et tous les canaux. Images : médiane des runs ; signaux : médiane et bande 5 à 95 %."))
 cells.append(code(r'''imp_all = [to_input_grid(np.abs(v), layer).mean(axis=(0, 1)) for v in LAM]       # (T,) ou (H, W)
-imp_filter = [to_input_grid(np.abs(v[FILTER]), layer).mean(axis=0) for v in LAM]
 
 if SIGNAL:
     fig, ax = figure(50, width_mm=WIDTH_MM)
     t = np.arange(len(imp_all[0]))
-    band(ax, t, imp_all, COLORS[0], "All filters and channels")
-    band(ax, t, imp_filter, COLORS[1], f"Filter {FILTER}")
+    band(ax, t, imp_all, COLORS[1], "All filters and channels")
     ax.set_xlabel("Time step")
     ax.set_ylabel(f"|{LAMBDA}|")
     ax.set_xlim(t[0], t[-1])
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, handlelength=1.8)
 else:
-    fig, axes = figure(46, 1, 2, width_mm=100)
-    maps = [np.median(imp_all, 0), np.median(imp_filter, 0)]
-    vmin, vmax = min(m.min() for m in maps), max(m.max() for m in maps)   # échelle commune aux deux cartes
-    for a, m, label in zip(axes, maps, ["All filters", f"Filter {FILTER}"]):
-        im = a.imshow(m, cmap=VALUE_CMAP, vmin=vmin, vmax=vmax, interpolation="nearest")
-        clean(a)
-        a.set_xlabel(label)
-    colorbar(fig, im, list(axes), f"Median |{LAMBDA}|")
+    fig, ax = figure(60, width_mm=70)
+    im = ax.imshow(np.median(imp_all, 0), cmap=VALUE_CMAP, interpolation="nearest")
+    clean(ax)
+    colorbar(fig, im, [ax], f"Median |{LAMBDA}|")
 publish(fig, "lambda_in_spatial")'''))
 
 cells.append(md("## 3. Dégradation du masque selon p, pour les trois méthodes\n\nMasques de `pruning.py` (mêmes fonctions), calculés dans chaque run sur ses valeurs entraînées. Couleur = part des `lambda_in` gardés à chaque position d'entrée (bleu = tout gardé, orange = tout retiré). Avec `mixte`, une position est gardée ou retirée pour tous les filtres ; avec `element` et `gradient`, chaque filtre a ses propres positions, d'où une dégradation progressive sur l'ensemble des filtres. `MASK_RUN` choisit le run montré (`None` = moyenne sur les runs)."))

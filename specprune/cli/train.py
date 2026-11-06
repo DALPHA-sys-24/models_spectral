@@ -393,6 +393,9 @@ def run(args, gpus, existing=None):
                   epochs=args.epochs, callbacks=callbacks, verbose=args.verbose)
         train_time = time.time() - t0 + (existing or {}).get("train_time_s", 0.0)
         test_loss, test_acc = agent.evaluate(test_ds, verbose=0)
+    # Keras 3 efface le point de reprise en fin d'entraînement ; Keras 2 (TensorFlow 2.15) vide le
+    # dossier sans le supprimer : on le retire, pour qu'un run terminé n'ait plus de backup/
+    shutil.rmtree(os.path.join(run_dir, BACKUP_DIR), ignore_errors=True)
 
     # --- Sauvegardes de fin de run (historique relu : il couvre aussi les epochs d'avant une reprise) ---
     history = _read_history(history_path)

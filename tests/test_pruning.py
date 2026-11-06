@@ -11,7 +11,7 @@ import tensorflow as tf
 
 from specprune.models import AgentNetwork, configure_spectral
 from specprune.prune import (apply_masks, assign_spectral_weights, compute_masks, freeze_spectral,
-                             get_spectral_values, prune_spectral, select_layers)
+                             get_spectral_values, prune_spectral, save_weights, select_layers)
 from specprune.runs import spectral_layers, valid_positions
 
 SHAPES = [(16, 16, 3), (64, 2)]   # image (SpecCnn2D) et signal (SpecCnn1D)
@@ -85,7 +85,8 @@ def test_freeze_and_assign(shape):
     # post-training : seuls les phi sont entraînés, les zéros restent à zéro
     apply_masks(agent, rep.masks, values=original)
     counts = freeze_spectral(agent, "phi")
-    assert all(v.name == "phi_weights" for v in agent.trainable_variables)
+    # Keras 3 : "phi_weights" ; Keras 2 : "spec_cnn2d/phi_weights:0"
+    assert all(v.name.split("/")[-1].split(":")[0] == "phi_weights" for v in agent.trainable_variables)
     phi_before = l0.phi_weights.numpy().copy()
     agent.compile(optimizer=tf.keras.optimizers.SGD(0.1), loss="sparse_categorical_crossentropy")
     x = np.random.randn(16, *shape).astype("float32")
@@ -97,3 +98,19 @@ def test_freeze_and_assign(shape):
     assert assign_spectral_weights(agent, original, verbose=False) == 2
     assert np.allclose(l0.lambda_in.numpy(), original[l0.name])
     assert counts["trainable"] > 0
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_save_after_freeze(shape, tmp_path):
+    """Poids enregistrés après freeze_spectral : relus tels quels par un modèle neuf (Keras 2 et 3)."""
+    agent = build(shape)
+    order = list(agent.weights)            # ordre d'origine (Keras 2 : freeze_spectral le change)
+    freeze_spectral(agent, "phi")
+    for v in agent.weights:
+        v.assign(np.random.randn(*v.shape).astype("float32"))
+    path = str(tmp_path / "w.weights.h5")
+    save_weights(agent, path)
+    other = build(shape)
+    other.load_weights(path)
+    for a, b in zip(order, other.weights):
+        assert np.array_equal(a.numpy(), b.numpy()), a.name

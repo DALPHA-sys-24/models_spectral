@@ -284,10 +284,20 @@ Ou, sans plan, trois scripts Slurm à éditer directement (grille en tête de ch
 `--array` à mettre à jour), à lancer depuis `models_spectral/` l'un après l'autre :
 
 ```bash
-sbatch experiments/slurm/train.sh     # dataset x graine
-sbatch experiments/slurm/prune.sh     # MODE="post" : dataset x run x p ; MODE="pre" : dataset x run
-sbatch experiments/slurm/finish.sh    # résumés et figures, par dataset (sans GPU)
+sbatch experiments/slurm/train.sh                                  # dataset x graine
+sbatch experiments/slurm/prune.sh                                  # post (element) : dataset x run x p
+MODE=pre sbatch --array=0-14 experiments/slurm/prune.sh            # pre, les 3 méthodes : dataset x run
+sbatch experiments/slurm/finish.sh                                 # résumés et figures (sans GPU)
 ```
+
+`MODE` et `METHOD` (`gradient`, `element`, `mixte` ou `all`) se donnent à la soumission ; en pre,
+`all` est le défaut (les trois méthodes dans la même tâche). Si `--array` ne correspond pas à la
+grille, les tâches s'arrêtent avec la commande à lancer. `finish.sh` trace, pour chaque méthode,
+pre et post sur une même figure, et pour chaque mode les méthodes sur une même figure
+(`runs_pruning/figures/<groupe>_pre_methods`).
+
+Le code tourne avec TensorFlow 2.15 (Keras 2, module de Lyra) comme avec TensorFlow 2.21
+(Keras 3) : les poids d'un run se relisent d'une version à l'autre (testé dans les deux sens).
 
 Les mêmes découpages s'utilisent à la main :
 
