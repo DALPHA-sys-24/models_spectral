@@ -21,7 +21,7 @@ CHANCE=0.1                   # 1 / nombre de classes
 
 # Doivent être ceux de train.sh et prune.sh
 ARCH="spectral_resnet20"
-EPOCHS=20
+EPOCHS=50
 OUT_DIR="runs"
 PRUNING_DIR="runs_pruning"
 TAG="${ARCH}_${EPOCHS}ep_x${N_RUNS}"
@@ -37,8 +37,14 @@ GROUP="${DATASET}_${TAG}"
 
 module --force purge
 ml releases/2023a
+ml tis/2025
+ml CUDA/12.1.1
 ml Python/3.11.3-GCCcore-12.3.0
-source ~/venvs/spectral/bin/activate
+ml SciPy-bundle/2023.07-gfbf-2023a
+ml TensorFlow/2.15.1-foss-2023a-CUDA-12.1.1
+ml matplotlib/3.7.2
+ml Seaborn/0.13.2-gfbf-2023a
+ml scikit-learn/1.3.1-gfbf-2023a
 export TF_CPP_MIN_LOG_LEVEL=2
 
 echo "=========================================="

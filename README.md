@@ -177,10 +177,12 @@ GPUS="0 1" bash experiments/serie.sh                              # pruning sur 
 ### 5. Analyser
 
 `notebooks/analyse_lambda_in.ipynb` (à lancer depuis `notebooks/`) : version visuelle de
-`pruning.py --mode pre`, avec les mêmes fonctions de `specprune` et les mêmes options (`P_VALUES`,
-`PARAM`, `LAYERS`, `METHOD`, `CRITERION`) : valeurs brutes de lambda_in, importance de chaque
-entrée (pixel ou instant), masques de chaque p sur la carte et sur des exemples, précision du
-modèle élagué. Pour les mêmes réglages, il donne les mêmes précisions que `pruning.py`.
+`pruning.py --mode pre`, avec les mêmes fonctions de `specprune`. Donner `GROUP_DIR` (un dossier de
+`runs/`) : tous les runs du groupe (graines) sont chargés. Figures (médiane et bande 5 à 95 % sur
+les runs) : distribution des lambda_in (tous les filtres, et un filtre `FILTER`), carte ou profil
+par position, dégradation du masque selon p pour `gradient`, `element` et `mixte`, effet sur des
+exemples du dataset, précision selon p des trois méthodes sur une même figure. Enregistrées en PDF
+et PNG 600 dpi dans `<groupe>/analyse_lambda_in/<couche>/`, avec `results.csv` et `summary.csv`.
 
 ## Configuration spectrale
 
@@ -261,16 +263,22 @@ environnement Python) sont à adapter au cluster ; les journaux vont dans `jobs/
 
 Sur Lyra (CECI) : Slurm, file `batch`, un GPU par nœud (`--gres=gpu:1`), 5 jours au plus par
 job ; mettre `out_dir` et `pruning_dir` sous `$GLOBALSCRATCH` dans le JSON pour les gros volumes.
-Le module TensorFlow de Lyra (2.15) utilise Keras 2, alors que ce projet demande TensorFlow 2.21
-et Keras 3 : on installe donc un environnement Python une fois, sur le nœud de connexion :
+Sur Lyra, pas d'environnement virtuel : les modules du cluster suffisent (testés) :
 
 ```bash
-module --force purge && ml releases/2023a && ml Python/3.11.3-GCCcore-12.3.0
-python -m venv ~/venvs/spectral && source ~/venvs/spectral/bin/activate
-pip install --upgrade pip && pip install -r requirements_gpu.txt && pip install -e .
+module --force purge
+ml releases/2023a
+ml tis/2025
+ml CUDA/12.1.1
+ml Python/3.11.3-GCCcore-12.3.0
+ml SciPy-bundle/2023.07-gfbf-2023a
+ml TensorFlow/2.15.1-foss-2023a-CUDA-12.1.1
+ml matplotlib/3.7.2
+ml Seaborn/0.13.2-gfbf-2023a
+ml scikit-learn/1.3.1-gfbf-2023a
 ```
 
-Les scripts générés chargent ces mêmes modules et cet environnement (lignes `setup` du JSON).
+Les scripts générés et ceux de `experiments/slurm/` chargent ces mêmes modules (lignes `setup` du JSON).
 
 Ou, sans plan, trois scripts Slurm à éditer directement (grille en tête de chaque script,
 `--array` à mettre à jour), à lancer depuis `models_spectral/` l'un après l'autre :

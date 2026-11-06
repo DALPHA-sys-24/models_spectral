@@ -45,10 +45,18 @@ DEFAULT_SLURM = {
     "time": {"train": "1-00:00:00", "prepare": "00:20:00", "prune": "12:00:00", "finish": "00:30:00"},
     "per_gpu": 1,                  # tâches lancées en même temps sur un GPU (petits modèles : 2-4)
     "account": "",
-    # Lyra : Python des modules, puis l'environnement où requirements_gpu.txt est installé
-    # (le module TensorFlow/2.15 de Lyra a Keras 2 ; ce projet demande TensorFlow 2.21 et Keras 3)
-    "setup": ["module --force purge", "ml releases/2023a", "ml Python/3.11.3-GCCcore-12.3.0",
-              "source ~/venvs/spectral/bin/activate", "export TF_GPU_ALLOCATOR=cuda_malloc_async",
+    # Lyra : modules du cluster (TensorFlow 2.15 compris), sans environnement virtuel
+    "setup": ["module --force purge",
+              "ml releases/2023a",
+              "ml tis/2025",
+              "ml CUDA/12.1.1",
+              "ml Python/3.11.3-GCCcore-12.3.0",
+              "ml SciPy-bundle/2023.07-gfbf-2023a",
+              "ml TensorFlow/2.15.1-foss-2023a-CUDA-12.1.1",
+              "ml matplotlib/3.7.2",
+              "ml Seaborn/0.13.2-gfbf-2023a",
+              "ml scikit-learn/1.3.1-gfbf-2023a",
+              "export TF_GPU_ALLOCATOR=cuda_malloc_async",
               "export TF_CPP_MIN_LOG_LEVEL=2"],
 }
 

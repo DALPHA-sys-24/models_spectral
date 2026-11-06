@@ -36,7 +36,7 @@ fi
 
 # Doivent être ceux de train.sh
 ARCH="spectral_resnet20"
-EPOCHS=20
+EPOCHS=50
 SEED=42
 OUT_DIR="runs"
 PRUNING_DIR="runs_pruning"
@@ -65,12 +65,18 @@ RUN_DIRS=()
 for k in $(seq 0 $((N_RUNS - 1))); do RUN_DIRS+=("$OUT_DIR/$GROUP/seed$((SEED + k))"); done
 
 # =============================================================================
-# CHARGEMENT DES MODULES (environnement ~/venvs/spectral, voir README)
+# CHARGEMENT DES MODULES (modules de Lyra, sans environnement virtuel)
 # =============================================================================
 module --force purge
 ml releases/2023a
+ml tis/2025
+ml CUDA/12.1.1
 ml Python/3.11.3-GCCcore-12.3.0
-source ~/venvs/spectral/bin/activate
+ml SciPy-bundle/2023.07-gfbf-2023a
+ml TensorFlow/2.15.1-foss-2023a-CUDA-12.1.1
+ml matplotlib/3.7.2
+ml Seaborn/0.13.2-gfbf-2023a
+ml scikit-learn/1.3.1-gfbf-2023a
 
 # =============================================================================
 # DEBUG INFO

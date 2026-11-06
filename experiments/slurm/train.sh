@@ -25,7 +25,7 @@ N_DATASETS=${#DATASETS[@]}
 # =============================================================================
 ARCH="spectral_resnet20"
 SPECTRAL_CONFIG="configs/spectral_config.json"
-EPOCHS=20
+EPOCHS=50
 BATCH_SIZE=128
 LEARNING_RATE=0.1
 SEED=42
@@ -49,14 +49,18 @@ if [[ "$DATASET" == "mnist1d" ]]; then
 fi
 
 # =============================================================================
-# CHARGEMENT DES MODULES
-# TensorFlow 2.21 / Keras 3 viennent de l'environnement ~/venvs/spectral (voir README) :
-# ne pas charger le module TensorFlow de Lyra (2.15, Keras 2).
+# CHARGEMENT DES MODULES (modules de Lyra, sans environnement virtuel)
 # =============================================================================
 module --force purge
 ml releases/2023a
+ml tis/2025
+ml CUDA/12.1.1
 ml Python/3.11.3-GCCcore-12.3.0
-source ~/venvs/spectral/bin/activate
+ml SciPy-bundle/2023.07-gfbf-2023a
+ml TensorFlow/2.15.1-foss-2023a-CUDA-12.1.1
+ml matplotlib/3.7.2
+ml Seaborn/0.13.2-gfbf-2023a
+ml scikit-learn/1.3.1-gfbf-2023a
 
 # =============================================================================
 # DEBUG INFO

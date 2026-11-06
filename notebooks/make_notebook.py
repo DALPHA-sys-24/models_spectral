@@ -11,53 +11,68 @@ nb = nbf.v4.new_notebook()
 md, code = nbf.v4.new_markdown_cell, nbf.v4.new_code_cell
 cells = []
 
-cells.append(md("""# Analyse de `lambda_in` et pruning d'ordre p
+cells.append(md(r"""# Analyse de `lambda_in` et pruning d'ordre p, sur tous les runs d'un groupe
 
-Ce notebook est la version visuelle de `python pruning.py <run> --mode pre`. Il utilise les mêmes fonctions du paquet `specprune` (`load_run`, `masks_for`, `evaluate_pruned`) avec les mêmes réglages : pour les mêmes paramètres, il donne **les mêmes masques et les mêmes précisions** que `pruning.py`.
+Ce notebook est la version visuelle de `python pruning.py <runs> --mode pre`. Il utilise les mêmes fonctions de `specprune` (`load_run`, `masks_for`, `evaluate_pruned`) : pour les mêmes paramètres, il donne **les mêmes masques et les mêmes précisions** que `pruning.py`.
 
-1. Chargement du run (modèle entraîné et poids) et des mêmes données que l'entraînement (dataset, sous-ensembles, normalisation relus dans `config.json`).
-2. Valeurs brutes de `lambda_in` et importance de chaque position d'entrée (pixel ou instant).
-3. Masques du pruning d'ordre *p* (`METHOD`) : dans chaque filtre (`gradient`, `element`) ou sur tous les filtres (`mixte`), les scores |w| en deçà du percentile d'ordre *p* sont mis à zéro (positions de padding exclues).
-4. Positions d'entrée encore vues par la couche, sur la carte et sur des exemples.
-5. Précision sur le test du modèle élagué, sans réentraînement (pré-training). Le post-training (phi réentraînés) se lance avec `pruning.py --mode post`.
+1. Chargement de **tous les runs** d'un dossier de `runs/` (les graines `seed*/` lancées avec `--n_runs`), et des mêmes données que l'entraînement.
+2. Distribution des `lambda_in` : médiane et bande 5 à 95 % sur les runs, pour tous les filtres et canaux, et pour un filtre (`FILTER`). Puis la même chose position par position (carte ou profil temporel).
+3. Dégradation du masque selon *p*, pour les trois méthodes (`gradient`, `element`, `mixte`), sur tous les filtres puis sur le filtre `FILTER`.
+4. Effet de cette dégradation sur des exemples du dataset du run (ce que voit la première couche).
+5. Précision sur le test du modèle élagué (pré-training) pour les trois méthodes, sur une même figure (médiane et bande 5 à 95 % sur les runs).
 
-Seule la cellule **Paramètres** est à modifier. Le notebook se lance depuis le dossier `notebooks/` ; il marche pour des images (SpecCnn2D) comme pour des signaux (SpecCnn1D)."""))
+Seule la cellule **Paramètres** est à modifier. Les figures sont faites pour un article (style Nature Communications : pas de titre, textes en anglais, Arial 7 pt, orange, bleu, vert) et enregistrées en **PDF vectoriel et PNG 600 dpi** dans `<dossier du groupe>/analyse_lambda_in/<couche>/`. Le notebook se lance depuis `notebooks/` ; il marche pour des images (SpecCnn2D) comme pour des signaux (SpecCnn1D)."""))
 
 cells.append(md("## Paramètres"))
-cells.append(code('''# Dossier du run à analyser (contient config.json, weights.weights.h5, spectral/).
-# None = le run le plus récent de RUNS_ROOT. Le dataset est relu dans le run.
-RUN_DIR = None
-RUNS_ROOT = "../runs"   # le notebook est dans notebooks/ : les runs sont dans ../runs
+cells.append(code(r'''# Dossier dans runs/ : un groupe lancé avec --n_runs (sous-dossiers seed42/, seed43/, ...) ou un seul run.
+# None = le dossier le plus récent de RUNS_ROOT. Le dataset est relu dans les runs.
+GROUP_DIR = None
+RUNS_ROOT = "../runs"        # le notebook est dans notebooks/ : les runs sont dans ../runs
 
-# Pruning : mêmes options que pruning.py (--p, --param, --layers, --method, --criterion, --include_padding)
+# Pruning : mêmes options que pruning.py (--p, --layers, --method, --criterion, --include_padding)
 P_VALUES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-PARAM = "lambda_in"          # "lambda_in", "lambda_out" ou "alpha"
-LAYERS = "trained"           # "trained" (couches où PARAM est entraîné), "*", "0", "1-5", "0,3"
 # "gradient" : par filtre, percentile sur tous les |w| du filtre (poids par poids)
 # "element"  : par filtre, score d'un pixel = somme des |w| sur les canaux ; pixel retiré pour tous ses canaux
 # "mixte"    : comme element, mais score sommé sur tous les filtres ; pixel retiré pour tous les filtres
-METHOD = "element"
-CRITERION = "percentile"     # "percentile" (|w| < percentile d'ordre p mis à zéro) ou "rank" (round(p*n))
+METHODS = ["gradient", "element", "mixte"]
+LAYERS = "trained"           # couches élaguées : "trained" (lambda_in entraîné), "*", "0", "1-5", "0,3"
+CRITERION = "percentile"     # "percentile" ou "rank"
 INCLUDE_PADDING = False      # True = classer aussi les positions de padding
 
-# Couche affichée (cartes, exemples) : None = la première couche élaguée
-SHOW_LAYER = None
+# Ce qui est montré
+LAYER = None                 # couche montrée : nom ou indice de convolution ; None = première couche élaguée
+FILTER = 0                   # filtre montré seul (distribution, masque, images)
+P_SHOW = [0.0, 0.3, 0.5, 0.7, 0.9]   # colonnes des figures de masques et d'images
+MASK_RUN = 0                 # run des masques montrés (0 = première graine) ; None = moyenne sur les runs
+EXAMPLE_INDICES = None       # indices dans le jeu de test ; None = un exemple par classe
+N_EXAMPLES = 3               # nombre d'exemples si EXAMPLE_INDICES = None
+IMAGE_MASK = "all"           # images : "all" (part gardée sur tous les filtres) ou "filter" (masque de FILTER)
 
-# Exemples : indices dans le jeu de test, ou None = un exemple par classe (10 au plus)
-EXAMPLE_INDICES = None
+EVALUATE = True              # précision du modèle élagué (section 5)
+DEVICE = "/GPU:0"            # "/CPU:0" sans GPU
 
-# Précision du modèle élagué sur le test (comme pruning.py --mode pre)
-EVALUATE = True
-DEVICE = "/GPU:0"            # "/CPU:0" sans GPU'''))
+# Figures
+STAT, BAND = "median", "quantile"    # médiane et bande 5-95 % ("mean" / "std" possibles)
+HIST_BINS = 60
+HIST_YSCALE = "linear"       # "linear" ou "log" (distribution des lambda_in)
+WIDTH_MM = 183               # 89 = une colonne, 183 = deux colonnes
+FORMATS = ["pdf", "png"]
+DPI = 600
+METHOD_LABELS = {"gradient": "Gradient", "element": "Element", "mixte": "Mixed"}'''))
 
-cells.append(md("## Imports"))
-cells.append(code('''import json
+cells.append(md("## Imports et style des figures"))
+cells.append(code(r'''import csv
+import glob
+import json
 import os
+import re
 import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
+from IPython.display import display
+from matplotlib.colors import LinearSegmentedColormap
 
 # Paquet specprune : installé (pip install -e .), sinon pris dans la racine du projet, que le
 # notebook soit lancé depuis notebooks/ ou depuis models_spectral/
@@ -72,46 +87,143 @@ try:
     from specprune.prune import assign_spectral_weights, evaluate_pruned, masks_for, select_layers
     from specprune.runs import load_run, load_run_data, spectral_layers, test_dataset, valid_positions
     from specprune.training import compile_agent, recipe_from_run
+    from specprune.plotting import COLORS, KEPT_CMAP, MM, Style, save
     import specprune
 except ImportError as e:
-    raise ImportError(f"{e}\\nspecprune introuvable ou trop ancien : ouvrir le notebook depuis "
+    raise ImportError(f"{e}\nspecprune introuvable ou trop ancien : ouvrir le notebook depuis "
                       "models_spectral/notebooks/, ou installer le projet (pip install -e .).") from None
 print("specprune", specprune.__version__, "chargé depuis", os.path.dirname(specprune.__file__))
 
-np.set_printoptions(precision=4, suppress=True)'''))
+%config InlineBackend.figure_format = "retina"
+np.set_printoptions(precision=4, suppress=True)
 
-cells.append(md("## 1. Chargement du run et des données"))
-cells.append(code('''if RUN_DIR is None:
-    candidates = [os.path.join(RUNS_ROOT, d) for d in os.listdir(RUNS_ROOT)
-                  if os.path.exists(os.path.join(RUNS_ROOT, d, "config.json"))]
+style = Style(width_mm=WIDTH_MM, formats=FORMATS, dpi=DPI)
+LAMBDA = r"$\lambda_{in}$"
+VALUE_CMAP = LinearSegmentedColormap.from_list("value", ["#ffffff", "#9ecae1", COLORS[1], "#08306b"])
+
+
+def figure(height_mm, nrows=1, ncols=1, width_mm=None, **kw):
+    """Figure au style de l'article (largeur WIDTH_MM, hauteur en mm)."""
+    style.apply()
+    plt.rcParams["mathtext.default"] = "regular"   # lambda dans la police du texte
+    return plt.subplots(nrows, ncols, figsize=((width_mm or style.width_mm) * MM, height_mm * MM), **kw)
+
+
+def band(ax, x, curves, color, label, marker=None):
+    """Médiane (ou moyenne) des runs et bande 5-95 % (ou +- écart type), si plusieurs runs."""
+    y = np.stack(curves)
+    center = np.median(y, 0) if STAT == "median" else y.mean(0)
+    if len(y) > 1 and BAND != "none":
+        lo, hi = ((np.quantile(y, 0.05, 0), np.quantile(y, 0.95, 0)) if BAND == "quantile"
+                  else (y.mean(0) - y.std(0), y.mean(0) + y.std(0)))
+        ax.fill_between(x, lo, hi, color=color, alpha=0.22, lw=0)
+    ax.plot(x, center, color=color, label=label, marker=marker, markeredgecolor="white",
+            markeredgewidth=0.4)
+
+
+def clean(ax):
+    ax.set_xticks([]); ax.set_yticks([])
+    for s in ax.spines.values():
+        s.set_visible(False)
+
+
+def colorbar(fig, im, axes, label):
+    cb = fig.colorbar(im, ax=axes, fraction=0.025, pad=0.02, aspect=25)
+    cb.set_label(label)
+    cb.outline.set_linewidth(style.axis_width)
+    cb.ax.tick_params(width=style.axis_width)
+    return cb
+
+
+def publish(fig, name):
+    """Affiche la figure puis l'enregistre (PDF + PNG 600 dpi) dans OUT_DIR."""
+    display(fig)
+    files = save(fig, os.path.join(OUT_DIR, name), style)
+    print("  ->", ", ".join(os.path.relpath(f) for f in files))'''))
+
+cells.append(md("## 1. Chargement de tous les runs du dossier\n\nUn dossier de groupe (`--n_runs`) contient un sous-dossier par graine ; chacun est rechargé (architecture, configuration spectrale, poids de fin d'entraînement). Les runs non terminés sont ignorés. Les données sont relues une fois, avec les sous-ensembles et la normalisation des runs."))
+cells.append(code(r'''def run_dirs_of(folder):
+    """Runs terminés d'un dossier : le dossier lui-même, ou ses sous-dossiers (graines), triés par graine."""
+    if os.path.exists(os.path.join(folder, "config.json")):
+        found = [folder]
+    else:
+        found = [d for d in glob.glob(os.path.join(folder, "*"))
+                 if os.path.exists(os.path.join(d, "config.json"))]
+    seed = lambda d: [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", os.path.basename(d))]
+    return sorted(found, key=seed)
+
+
+if GROUP_DIR is None:
+    candidates = [d for d in glob.glob(os.path.join(RUNS_ROOT, "*")) if os.path.isdir(d) and run_dirs_of(d)]
     if not candidates:
-        raise FileNotFoundError(f"Aucun run dans {RUNS_ROOT}/ : renseigner RUN_DIR")
-    RUN_DIR = max(candidates, key=os.path.getmtime)
+        raise FileNotFoundError(f"Aucun run dans {RUNS_ROOT}/ : renseigner GROUP_DIR")
+    GROUP_DIR = max(candidates, key=os.path.getmtime)
+GROUP_DIR = os.path.normpath(GROUP_DIR)
 
+RUN_DIRS, skipped = [], []
+for d in run_dirs_of(GROUP_DIR):
+    with open(os.path.join(d, "config.json")) as f:
+        done = "finished_at" in json.load(f) or not os.path.exists(os.path.join(d, "backup"))
+    (RUN_DIRS if done and os.path.exists(os.path.join(d, "weights.weights.h5")) else skipped).append(d)
+if not RUN_DIRS:
+    raise FileNotFoundError(f"Aucun run terminé (avec ses poids) dans {GROUP_DIR}")
+if skipped:
+    print("Ignorés (non terminés ou sans poids) :", [os.path.basename(d) for d in skipped])
+
+agents, configs, test_sets = [], [], []
+data_cache = {}
 with tf.device(DEVICE):
-    agent, config = load_run(RUN_DIR)          # architecture, réglages spectraux et poids du run
-args = config["args"]
-train, val, test, info = load_run_data(config)  # mêmes données, même normalisation
-x_test, y_test = test
-test_ds = test_dataset(test, info, args)
-compile_agent(agent, recipe_from_run(args), 1)  # compilation pour l'évaluation (perte du run)
+    for d in RUN_DIRS:
+        agent, config = load_run(d)
+        args = config["args"]
+        # le test et la normalisation ne dépendent de la graine que si une validation est tirée du train
+        key = args.get("seed") if args.get("val_split", 0) else None
+        if key not in data_cache:
+            data_cache[key] = load_run_data(config)
+        train, val, test, info = data_cache[key]
+        compile_agent(agent, recipe_from_run(args), 1)   # compilation pour l'évaluation (perte du run)
+        agents.append(agent); configs.append(config); test_sets.append(test_dataset(test, info, args))
 
+archs = {(c["args"]["arch"], c["args"]["dataset"], c["dataset"]["num_classes"]) for c in configs}
+if len(archs) > 1:
+    raise ValueError(f"Runs non comparables dans {GROUP_DIR} : {archs}")
+
+args = configs[0]["args"]
+SEEDS = [c["args"].get("seed") for c in configs]
+RUN_NAMES = [os.path.basename(d) for d in RUN_DIRS]
+x_test, y_test = test
 SIGNAL = info.modality == "signal"   # signal (T, C) : SpecCnn1D ; image (H, W, C) : SpecCnn2D
 C = info.input_shape[-1]
-unit = "instants" if SIGNAL else "pixels"
 mean, std = np.array(info.mean), np.array(info.std)
 class_names = info.class_names or [str(i) for i in range(info.num_classes)]
 
-print(f"Run      : {config['run_name']}  ({RUN_DIR})")
-print(f"Modèle   : {args['arch']}  |  config spectrale : {os.path.basename(config['spectral_config_file'] or '')}")
+print(f"Dossier  : {GROUP_DIR}  ({len(RUN_DIRS)} runs)")
+print(f"Modèle   : {args['arch']}  |  config spectrale : {os.path.basename(configs[0].get('spectral_config_file') or '')}")
 print(f"Dataset  : {info.name} ({info.modality}) {info.input_shape}, {info.num_classes} classes, test = {len(x_test)}")
-print(f"Précision test du run : {config.get('test_accuracy', float('nan')):.4f}")'''))
+for name, c in zip(RUN_NAMES, configs):
+    print(f"  {name:<12} graine {c['args'].get('seed')}  précision test {c.get('test_accuracy', float('nan')):.4f}")'''))
 
-cells.append(md("## 2. Valeurs brutes et importance de chaque position\n\nImportance d'une position d'entrée = moyenne sur les filtres et les canaux de |lambda_in| (positions de padding retirées). C'est un affichage : le pruning, lui, suit `METHOD`."))
-cells.append(code('''targets = select_layers(agent, LAYERS, PARAM)
-layer = targets[0] if SHOW_LAYER is None else next(l for l in targets if l.name == SHOW_LAYER)
-conv_index = spectral_layers(agent).index(layer)
-print(f"Couches élaguées : {[l.name for l in targets]}  ->  affichage de '{layer.name}' (convolution {conv_index})")
+cells.append(md("## 2. Distribution des `lambda_in`\n\nPour chaque run : histogramme (densité) des valeurs brutes de `lambda_in` de la couche montrée, positions de padding retirées, sur des classes communes à tous les runs. La courbe est la médiane des runs, la bande va du quantile 5 % au quantile 95 %. Orange : tous les filtres et tous les canaux ; bleu : le filtre `FILTER` seul (tous ses canaux)."))
+cells.append(code(r'''targets = select_layers(agents[0], LAYERS, "lambda_in")
+spec = spectral_layers(agents[0])
+# indices de convolution : les noms Keras des couches changent d'un modèle chargé à l'autre
+TARGETS = [spec.index(l) for l in targets]
+TARGET_NAMES = [l.name for l in targets]
+if LAYER is None:
+    layer = targets[0]
+elif isinstance(LAYER, int):
+    layer = spec[LAYER]
+else:
+    layer = next(l for l in spec if l.name == LAYER)
+conv_index = spec.index(layer)
+F, Cg = layer.lambda_in.shape[:2]
+if not 0 <= FILTER < F:
+    raise ValueError(f"FILTER = {FILTER} : la couche '{layer.name}' a {F} filtres (0 à {F - 1})")
+print(f"Couches élaguées : {TARGET_NAMES}")
+print(f"Couche montrée   : '{layer.name}' (convolution {conv_index}), lambda_in {tuple(layer.lambda_in.shape)}, filtre {FILTER}")
+
+OUT_DIR = os.path.join(GROUP_DIR, "analyse_lambda_in", layer.name)
+os.makedirs(OUT_DIR, exist_ok=True)
 
 
 def to_input_grid(a, layer):
@@ -122,132 +234,260 @@ def to_input_grid(a, layer):
     return grid[..., layer._Ph:layer._Ph + layer._H, layer._Pw:layer._Pw + layer._W]
 
 
-values = getattr(layer, PARAM).numpy()                    # poids bruts (F, C/groups, L)
-importance = to_input_grid(np.abs(values), layer).mean(axis=(0, 1)) if PARAM == "lambda_in" else None
-valid = valid_positions(layer) if PARAM == "lambda_in" and not INCLUDE_PADDING else np.ones(values.shape, bool)
-print(f"{PARAM} : {values.shape}, valeurs classées : {valid.sum()} ; min {values[valid].min():.4f}, "
-      f"médiane {np.median(values[valid]):.4f}, max {values[valid].max():.4f}")
+# valeurs de la couche montrée dans chaque run : (runs, F, C/groups, L)
+LAM = np.stack([spectral_layers(a)[conv_index].lambda_in.numpy() for a in agents])
+VALID = valid_positions(layer)
+samples_all = [v[VALID] for v in LAM]
+samples_filter = [v[FILTER][VALID[FILTER]] for v in LAM]
+lo, hi = min(s.min() for s in samples_all), max(s.max() for s in samples_all)
+bins = np.linspace(lo, hi + 1e-12, HIST_BINS + 1)
+centers = (bins[:-1] + bins[1:]) / 2
 
-fig, axes = plt.subplots(1, 2, figsize=(12, 3.6))
-axes[0].hist(values[valid].ravel(), bins=100, color="steelblue")
-axes[0].set_yscale("log"); axes[0].set_title(f"{PARAM} brut ({layer.name})")
-if importance is not None:
-    if SIGNAL:
-        axes[1].plot(importance, "k"); axes[1].set_xlabel("instant")
-    else:
-        im = axes[1].imshow(importance, cmap="viridis"); fig.colorbar(im, ax=axes[1], fraction=0.046)
-    axes[1].set_title("importance de chaque position : moyenne de |lambda_in|")
+fig, ax = figure(58, width_mm=89)
+def density(s):
+    d = np.histogram(s, bins, density=True)[0]
+    return np.where(d > 0, d, np.nan) if HIST_YSCALE == "log" else d   # échelle log : classes vides retirées
+
+
+band(ax, centers, [density(s) for s in samples_all], COLORS[0], "All filters and channels")
+band(ax, centers, [density(s) for s in samples_filter], COLORS[1], f"Filter {FILTER}")
+ax.set_yscale(HIST_YSCALE)
+ax.set_xlabel(LAMBDA)
+ax.set_ylabel("Density")
+ax.set_ylim(bottom=None if HIST_YSCALE == "log" else 0)
+ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, handlelength=1.8)
+publish(fig, "lambda_in_distribution")
+
+for label, s in (("tous les filtres", samples_all), (f"filtre {FILTER}", samples_filter)):
+    q = np.stack([np.quantile(x, [0.05, 0.5, 0.95]) for x in s])
+    print(f"{label:>16} : médiane des runs de (q5, médiane, q95) = {np.median(q, 0)} ; "
+          f"part |lambda_in| < 1e-3 : {np.median([np.mean(np.abs(x) < 1e-3) for x in s]):.1%}")'''))
+
+cells.append(md("### Position par position\n\nImportance d'une position d'entrée (pixel ou instant) = moyenne de |`lambda_in`| sur les filtres et les canaux (à gauche, ou en orange pour un signal), ou sur les canaux du filtre `FILTER` (à droite, ou en bleu). Images : médiane des runs ; signaux : médiane et bande 5 à 95 %."))
+cells.append(code(r'''imp_all = [to_input_grid(np.abs(v), layer).mean(axis=(0, 1)) for v in LAM]       # (T,) ou (H, W)
+imp_filter = [to_input_grid(np.abs(v[FILTER]), layer).mean(axis=0) for v in LAM]
+
+if SIGNAL:
+    fig, ax = figure(50, width_mm=WIDTH_MM)
+    t = np.arange(len(imp_all[0]))
+    band(ax, t, imp_all, COLORS[0], "All filters and channels")
+    band(ax, t, imp_filter, COLORS[1], f"Filter {FILTER}")
+    ax.set_xlabel("Time step")
+    ax.set_ylabel(f"|{LAMBDA}|")
+    ax.set_xlim(t[0], t[-1])
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2, handlelength=1.8)
 else:
-    axes[1].axis("off")
-plt.tight_layout(); plt.show()'''))
+    fig, axes = figure(46, 1, 2, width_mm=100)
+    maps = [np.median(imp_all, 0), np.median(imp_filter, 0)]
+    vmin, vmax = min(m.min() for m in maps), max(m.max() for m in maps)   # échelle commune aux deux cartes
+    for a, m, label in zip(axes, maps, ["All filters", f"Filter {FILTER}"]):
+        im = a.imshow(m, cmap=VALUE_CMAP, vmin=vmin, vmax=vmax, interpolation="nearest")
+        clean(a)
+        a.set_xlabel(label)
+    colorbar(fig, im, list(axes), f"Median |{LAMBDA}|")
+publish(fig, "lambda_in_spatial")'''))
 
-cells.append(md("## 3. Masques du pruning d'ordre p\n\nMêmes masques que `pruning.py` (fichiers `masks/p*.npz`) : pour chaque *p*, les scores en deçà du percentile d'ordre *p* sont retirés, calculés sur les valeurs du modèle entraîné (`gradient` : chaque |w| d'un filtre ; `element` : somme des |w| sur les canaux pour chaque pixel d'un filtre ; `mixte` : somme sur les filtres et les canaux)."))
-cells.append(code('''original, reports = masks_for(agent, P_VALUES, [l.name for l in targets], PARAM, METHOD,
-                              CRITERION, INCLUDE_PADDING)
+cells.append(md("## 3. Dégradation du masque selon p, pour les trois méthodes\n\nMasques de `pruning.py` (mêmes fonctions), calculés dans chaque run sur ses valeurs entraînées. Couleur = part des `lambda_in` gardés à chaque position d'entrée (bleu = tout gardé, orange = tout retiré). Avec `mixte`, une position est gardée ou retirée pour tous les filtres ; avec `element` et `gradient`, chaque filtre a ses propres positions, d'où une dégradation progressive sur l'ensemble des filtres. `MASK_RUN` choisit le run montré (`None` = moyenne sur les runs)."))
+cells.append(code(r'''# KEPT[m][p] : part gardée par canal, (runs, C/groups, T) ou (runs, C/groups, H, W), moyenne sur les filtres
+# KEPT_F[m][p] : masque du filtre FILTER, même forme
+KEPT, KEPT_F, FRACTION = {}, {}, {}
+for m in METHODS:
+    KEPT[m], KEPT_F[m], FRACTION[m] = {}, {}, {}
+    for r, agent in enumerate(agents):
+        _, reports = masks_for(agent, P_VALUES, TARGETS, "lambda_in", m, CRITERION, INCLUDE_PADDING)
+        shown = spectral_layers(agent)[conv_index].name
+        for p, rep in reports.items():
+            grid = to_input_grid(rep.masks[shown].astype(np.float32), layer)   # (F, Cg, ...)
+            KEPT[m].setdefault(p, []).append(grid.mean(axis=0))
+            KEPT_F[m].setdefault(p, []).append(grid[FILTER])
+            FRACTION[m].setdefault(p, []).append(rep.fraction)
+    KEPT[m] = {p: np.stack(v) for p, v in KEPT[m].items()}
+    KEPT_F[m] = {p: np.stack(v) for p, v in KEPT_F[m].items()}
 
-print(f"{'p':>5} | {'retirés':>9} | {'fraction':>8} | par couche")
-print("-" * 70)
-for p, rep in reports.items():
-    per_layer = ", ".join(f"{n}: {f:.1%}" for n, f in rep.per_layer().items())
-    print(f"{p:>5.2f} | {rep.pruned:>9} | {rep.fraction:>8.1%} | {per_layer}")
 
-# Part des poids gardés à chaque position d'entrée de la couche affichée (1 = tous les filtres et canaux)
-kept = {p: to_input_grid(rep.masks[layer.name].astype(float), layer).mean(axis=(0, 1))
-        for p, rep in reports.items()} if PARAM == "lambda_in" else {}'''))
+def pick(kept):
+    """Run MASK_RUN, ou moyenne sur les runs."""
+    return kept.mean(0) if MASK_RUN is None else kept[MASK_RUN]
 
-cells.append(md(f"## 4. Positions d'entrée encore vues par la couche\n\nPour chaque *p* : part des `lambda_in` gardés à chaque position (vert = tous gardés, orange = position retirée pour tous les filtres). Avec `METHOD = \"mixte\"`, une position est gardée ou retirée en entier ; avec `\"element\"` ou `\"gradient\"`, chaque filtre a ses propres positions, d'où une dégradation progressive."))
-cells.append(code('''from matplotlib.colors import LinearSegmentedColormap
 
-# part des poids gardés : orange = retiré, vert = gardé
-KEPT_CMAP = LinearSegmentedColormap.from_list("gardé", ["#e8710a", "#f2c14e", "#1e8e3e"])
+def nearest(p):
+    return min(P_VALUES, key=lambda q: abs(q - p))
 
-if kept:
-    n = len(P_VALUES)
-    fig, axes = plt.subplots(1, n, figsize=(1.9 * n, 2.2 if not SIGNAL else 1.6), squeeze=False)
-    for a, p in zip(axes[0], P_VALUES):
-        k = kept[p]
-        a.imshow(np.atleast_2d(k), cmap=KEPT_CMAP, vmin=0, vmax=1, aspect="auto" if SIGNAL else "equal",
-                 interpolation="nearest")
-        a.set_title(f"p={p:g}", fontsize=8); a.axis("off")
-    plt.suptitle(f"part des lambda_in gardés par position ({layer.name})", fontsize=9)
-    plt.tight_layout(); plt.show()
 
-# Exemples : uniquement pour la couche qui voit l'entrée (convolution 0)
-if kept and conv_index == 0:
+P_COLS = [nearest(p) for p in P_SHOW]
+print(f"Masques montrés : {'moyenne des runs' if MASK_RUN is None else RUN_NAMES[MASK_RUN]} ; p = {P_COLS}")
+print(f"{'p':>5} | " + " | ".join(f"{METHOD_LABELS[m]:>9}" for m in METHODS) + "   (fraction retirée, médiane des runs)")
+for p in P_VALUES:
+    print(f"{p:>5.2f} | " + " | ".join(f"{np.median(FRACTION[m][p]):>9.1%}" for m in METHODS))
+
+
+def plot_mask_grid(kept_by_method, name):
+    """Lignes = méthodes ; images : colonnes = P_SHOW ; signaux : une carte p x temps par méthode."""
+    n = len(METHODS)
+    if SIGNAL:
+        fig, axes = figure(16 * n + 8, n, 1, width_mm=WIDTH_MM, sharex=True, squeeze=False)
+        axes = axes[:, 0]
+        for a, m in zip(axes, METHODS):
+            img = np.stack([pick(kept_by_method[m][p]).mean(0) for p in P_VALUES])
+            im = a.imshow(img, cmap=KEPT_CMAP, vmin=0, vmax=1, aspect="auto", interpolation="nearest",
+                          origin="lower", extent=[-0.5, img.shape[1] - 0.5, -0.5, len(P_VALUES) - 0.5])
+            ticks = range(0, len(P_VALUES), max(1, len(P_VALUES) // 5))
+            a.set_yticks(list(ticks), [f"{P_VALUES[i]:g}" for i in ticks])
+            a.set_ylabel(f"{METHOD_LABELS[m]}\np")
+        axes[-1].set_xlabel("Time step")
+    else:
+        cols = len(P_COLS)
+        fig, axes = figure(WIDTH_MM / (cols + 0.6) * n, n, cols, width_mm=WIDTH_MM, squeeze=False,
+                           gridspec_kw={"wspace": 0.05, "hspace": 0.08})
+        for i, m in enumerate(METHODS):
+            for j, p in enumerate(P_COLS):
+                a = axes[i, j]
+                im = a.imshow(pick(kept_by_method[m][p]).mean(0), cmap=KEPT_CMAP, vmin=0, vmax=1,
+                              interpolation="nearest")
+                clean(a)
+                if i == 0:
+                    a.set_title(f"p = {p:g}", fontsize=style.font_size, pad=3)
+                if j == 0:
+                    a.set_ylabel(METHOD_LABELS[m])
+    colorbar(fig, im, list(np.ravel(axes)), "Fraction of weights kept")
+    publish(fig, name)
+
+
+plot_mask_grid(KEPT, "masks_all_filters")'''))
+
+cells.append(md("### Masque du filtre `FILTER`\n\nMême figure pour un seul filtre (couleur = part de ses canaux gardés à chaque position). Avec `element` et `mixte`, un pixel est gardé ou retiré pour tous les canaux ; avec `gradient`, chaque canal est classé séparément."))
+cells.append(code(r'''plot_mask_grid(KEPT_F, f"masks_filter{FILTER}")'''))
+
+cells.append(md("## 4. Effet de la dégradation sur les données\n\nCe que voit la première couche : l'entrée normalisée multipliée par la part des poids gardés à chaque pixel, canal par canal (`IMAGE_MASK = \"all\"` : moyenne sur les filtres ; `\"filter\"` : masque du filtre `FILTER`). Un pixel retiré vaut 0 après normalisation, c'est-à-dire **la couleur moyenne du dataset** une fois l'image dénormalisée pour l'affichage : c'est exactement ce que reçoit le réseau. Signaux : le fond montre la part des poids gardés à chaque instant (bleu = gardé, orange = retiré). Lignes = méthodes, colonnes = *p*. Seulement pour la couche qui voit l'entrée (convolution 0)."))
+cells.append(code(r'''def denorm(x):
+    return x * std + mean
+
+
+def seen(x, k):
+    """Entrée normalisée x (H, W, C) vue à travers la part gardée k (Cg, H, W) : dénormalisée pour l'affichage,
+    sur l'échelle de l'image d'origine (même contraste pour toutes les colonnes)."""
+    k = np.moveaxis(k, 0, -1) if k.shape[0] == x.shape[-1] else k.mean(0)[..., None]
+    ref = denorm(x)
+    lo_, hi_ = (0.0, 1.0) if ref.min() >= 0 and ref.max() <= 1 else (ref.min(), ref.max())
+    img = np.clip((denorm(x * k) - lo_) / (hi_ - lo_ + 1e-12), 0, 1)
+    return img[..., 0] if img.shape[-1] == 1 else img
+
+
+if conv_index != 0:
+    print("La couche montrée n'est pas la première : ses entrées sont des cartes internes, pas les données.")
+else:
+    source = KEPT if IMAGE_MASK == "all" else KEPT_F
     if EXAMPLE_INDICES is None:
-        EXAMPLE_INDICES = [int(np.where(y_test == k)[0][0]) for k in range(min(info.num_classes, 10))
-                           if (y_test == k).any()]
-
-    def to_display(x):
+        classes = [k for k in range(info.num_classes) if (y_test == k).any()][:N_EXAMPLES]
+        EXAMPLE_INDICES = [int(np.where(y_test == k)[0][0]) for k in classes]
+    n = len(METHODS)
+    for idx in EXAMPLE_INDICES:
+        x = x_test[idx]
         if SIGNAL:
-            return x * std + mean
-        img = np.clip(x * std + mean, 0, 1)
-        return img[..., 0] if img.shape[-1] == 1 else img
+            cols = len(P_COLS)
+            fig, axes = figure(17 * n + 6, n, cols, width_mm=WIDTH_MM, sharex=True, sharey=True,
+                               squeeze=False, gridspec_kw={"wspace": 0.06, "hspace": 0.1})
+            xs = denorm(x)
+            lo_, hi_ = xs.min() - 0.05 * np.ptp(xs), xs.max() + 0.05 * np.ptp(xs)
+            for i, m in enumerate(METHODS):
+                for j, p in enumerate(P_COLS):
+                    a = axes[i, j]
+                    k = pick(source[m][p]).mean(0)
+                    a.imshow(k[None], extent=[-0.5, len(k) - 0.5, lo_, hi_], aspect="auto",
+                             cmap=KEPT_CMAP, vmin=0, vmax=1, alpha=0.45, interpolation="nearest")
+                    for ch in range(xs.shape[1]):
+                        a.plot(xs[:, ch], lw=0.7, color="black" if ch == 0 else plt.cm.Greys(0.4 + 0.5 * ch / xs.shape[1]))
+                    a.set_ylim(lo_, hi_)
+                    a.set_xlim(-0.5, len(k) - 0.5)
+                    if i == 0:
+                        a.set_title(f"p = {p:g}", fontsize=style.font_size, pad=3)
+                    if j == 0:
+                        a.set_ylabel(METHOD_LABELS[m])
+                    else:
+                        a.tick_params(labelleft=False)
+            fig.supxlabel("Time step", fontsize=style.font_size, y=-0.03)
+        else:
+            # colonne "Original" seulement si p = 0 n'est pas déjà montré (à p = 0, rien n'est retiré)
+            ps = P_COLS if 0.0 in P_COLS else [0.0] + P_COLS
+            cols = len(ps)
+            fig, axes = figure(WIDTH_MM / (cols + 0.2) * n, n, cols, width_mm=WIDTH_MM, squeeze=False,
+                               gridspec_kw={"wspace": 0.05, "hspace": 0.08})
+            gray = "gray" if C == 1 else None
+            for i, m in enumerate(METHODS):
+                for j, p in enumerate(ps):
+                    a = axes[i, j]
+                    k = np.ones((1,) + x.shape[:2]) if p == 0.0 else pick(source[m][p])
+                    a.imshow(seen(x, k), cmap=gray, vmin=0, vmax=1, interpolation="nearest")
+                    clean(a)
+                    if i == 0:
+                        a.set_title("Original (p = 0)" if p == 0.0 else f"p = {p:g}", fontsize=style.font_size, pad=3)
+                    if j == 0:
+                        a.set_ylabel(METHOD_LABELS[m])
+        print(f"Exemple {idx} (classe {class_names[y_test[idx]]})")
+        publish(fig, f"data_example{idx}_{IMAGE_MASK}")'''))
 
-    n_cols = len(P_VALUES) + 1
-    size = (2.6, 1.6) if SIGNAL else (1.9, 1.9)
-    fig, axes = plt.subplots(len(EXAMPLE_INDICES), n_cols,
-                             figsize=(size[0] * n_cols, size[1] * len(EXAMPLE_INDICES)), squeeze=False)
-    for r, idx in enumerate(EXAMPLE_INDICES):
-        x = to_display(x_test[idx])
-        axes[r, 0].set_ylabel(class_names[y_test[idx]], fontsize=8)
-        for c, p in enumerate([None] + P_VALUES):
-            a = axes[r, c]
-            if SIGNAL:
-                lo, hi = x.min(), x.max()
-                if p is not None:  # fond : part des poids gardés à chaque instant
-                    a.imshow(kept[p][None], extent=[-0.5, len(x) - 0.5, lo, hi], aspect="auto",
-                             cmap=KEPT_CMAP, vmin=0, vmax=1, alpha=0.55, interpolation="nearest")
-                for ch in range(x.shape[1]):  # signal en couleurs sombres, lisible sur les deux fonds
-                    a.plot(x[:, ch], lw=0.9, color=["black", "navy", "purple", "saddlebrown"][ch % 4])
-                a.set_ylim(lo, hi)
-            else:
-                w = np.ones(x.shape[:2]) if p is None else kept[p]
-                shown = x * (w if x.ndim == 2 else w[..., None])  # affichage : image x part gardée
-                a.imshow(shown, cmap="gray" if C == 1 else None, vmin=0, vmax=1)
-            a.set_xticks([]); a.set_yticks([])
-            if r == 0:
-                a.set_title("original" if p is None else f"p={p:g}", fontsize=8)
-    plt.suptitle("entrée vue par la couche 0 : " + ("fond vert = instant gardé, "
-                 "orange = instant retiré (teinte = part des poids gardés)" if SIGNAL else "image multipliée par la part des poids gardés"),
-                 fontsize=9)
-    plt.tight_layout(); plt.show()
-elif kept:
-    print("Couche intermédiaire : pas d'affichage sur les exemples (ses entrées sont des cartes internes).")'''))
-
-cells.append(md("## 5. Précision du modèle élagué (pré-training)\n\nPour chaque *p* : masques appliqués aux valeurs d'origine, puis évaluation sur le test du run, comme `pruning.py --mode pre`. Le modèle est remis à ses valeurs entraînées à la fin."))
-cells.append(code('''results = {}
+cells.append(md("## 5. Précision du modèle élagué : les trois méthodes sur une même figure\n\nPour chaque run, chaque méthode et chaque *p* : masques appliqués aux valeurs d'origine, puis évaluation sur le test du run, comme `pruning.py --mode pre`. Courbe = médiane des runs, bande = quantiles 5 et 95 %, pointillés = hasard. Chaque modèle est remis à ses valeurs entraînées après chaque méthode."))
+cells.append(code(r'''ROWS = []
 if EVALUATE:
     with tf.device(DEVICE):
-        for p, rep in reports.items():
-            results[p] = evaluate_pruned(agent, rep, original, test_ds)  # (précision, perte)
-        assign_spectral_weights(agent, original, PARAM, verbose=False)   # retour au modèle entraîné
+        for r, agent in enumerate(agents):
+            for m in METHODS:
+                original, reports = masks_for(agent, P_VALUES, TARGETS, "lambda_in", m, CRITERION,
+                                              INCLUDE_PADDING)
+                for p, rep in reports.items():
+                    acc, loss = evaluate_pruned(agent, rep, original, test_sets[r])
+                    ROWS.append({"run": RUN_NAMES[r], "seed": SEEDS[r], "method": m, "p": p,
+                                 "fraction_pruned": rep.fraction, "test_accuracy": acc, "test_loss": loss})
+                assign_spectral_weights(agent, original, "lambda_in", verbose=False)  # retour au modèle entraîné
+            print(f"{RUN_NAMES[r]} évalué")
 
-    print(f"{'p':>5} | {'fraction retirée':>16} | {'précision test':>14} | {'perte':>8}")
-    print("-" * 54)
-    for p, (acc, loss) in results.items():
-        print(f"{p:>5.2f} | {reports[p].fraction:>16.1%} | {acc:>14.4f} | {loss:>8.4f}")
+    acc = {m: [[row["test_accuracy"] for row in ROWS if row["run"] == run and row["method"] == m]
+               for run in RUN_NAMES] for m in METHODS}
+    fig, ax = figure(60, width_mm=89)
+    for i, m in enumerate(METHODS):
+        band(ax, np.array(P_VALUES), acc[m], style.color(i), METHOD_LABELS[m], style.marker(i))
+    ax.axhline(1 / info.num_classes, color="#8c8c8c", lw=0.6, ls="--", zorder=0)
+    ax.set_xlabel("Pruning ratio p")
+    ax.set_ylabel("Accuracy")
+    ax.set_ylim(0, 1.02)
+    ax.set_xlim(min(P_VALUES) - 0.02, max(P_VALUES) + 0.02)
+    ax.legend(loc="lower left", handlelength=1.8)
+    publish(fig, "accuracy_vs_p_methods")
+    if Cg == 1 and {"gradient", "element"} <= set(METHODS):
+        print("Une seule voie d'entrée par filtre : gradient et element donnent les mêmes masques (courbes superposées).")
 
-    plt.figure(figsize=(6, 3.6))
-    plt.plot(list(results), [a for a, _ in results.values()], "o-")
-    plt.xlabel("ordre p (fraction des poids retirés)"); plt.ylabel("précision test"); plt.ylim(0, 1.02)
-    plt.title(f"Pré-training : {PARAM}, {METHOD}, {CRITERION}"); plt.grid(alpha=0.3)
-    plt.tight_layout(); plt.show()'''))
+    print(f"\n{'p':>5} | " + " | ".join(f"{METHOD_LABELS[m]:>17}" for m in METHODS) + "   (médiane [q5, q95])")
+    for k, p in enumerate(P_VALUES):
+        cells_ = []
+        for m in METHODS:
+            v = np.array([a[k] for a in acc[m]])
+            cells_.append(f"{np.median(v):.3f} [{np.quantile(v, .05):.3f}, {np.quantile(v, .95):.3f}]")
+        print(f"{p:>5.2f} | " + " | ".join(f"{c:>17}" for c in cells_))'''))
 
-cells.append(md("## 6. Sauvegarde\n\nRéglages, fractions retirées et précisions dans `RUN_DIR/analyse_lambda_in/`."))
-cells.append(code('''out_dir = os.path.join(RUN_DIR, "analyse_lambda_in", f"{PARAM}_{METHOD}_{CRITERION}")
-os.makedirs(out_dir, exist_ok=True)
-summary = {
-    "run": config["run_name"], "param": PARAM, "layers": [l.name for l in targets], "method": METHOD,
-    "criterion": CRITERION, "include_padding": INCLUDE_PADDING,
-    "p": [{"p": p, "retires": rep.pruned, "total": rep.total, "fraction": rep.fraction,
-           "par_couche": rep.per_layer(),
-           **({"precision_test": results[p][0], "perte_test": results[p][1]} if p in results else {})}
-          for p, rep in reports.items()],
-}
-with open(os.path.join(out_dir, "resume.json"), "w") as f:
-    json.dump(summary, f, indent=2, ensure_ascii=False)
-print(f"Enregistré dans {out_dir}")'''))
+cells.append(md("## 6. Sauvegarde des données\n\n`results.csv` (une ligne par run, méthode et *p*), `summary.csv` (médiane et quantiles par méthode et *p*) et `settings.json`, à côté des figures."))
+cells.append(code(r'''if ROWS:
+    with open(os.path.join(OUT_DIR, "results.csv"), "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(ROWS[0]))
+        w.writeheader(); w.writerows(ROWS)
+    with open(os.path.join(OUT_DIR, "summary.csv"), "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["method", "p", "n", "fraction_pruned", "median", "mean", "std", "q05", "q95"])
+        for m in METHODS:
+            for p in P_VALUES:
+                rows = [row for row in ROWS if row["method"] == m and row["p"] == p]
+                v = np.array([row["test_accuracy"] for row in rows])
+                w.writerow([m, p, len(v), np.median([row["fraction_pruned"] for row in rows]), np.median(v),
+                            v.mean(), v.std(), np.quantile(v, .05), np.quantile(v, .95)])
+settings = {"group": GROUP_DIR, "runs": RUN_NAMES, "seeds": SEEDS, "layer": layer.name,
+            "conv_index": conv_index, "pruned_layers": TARGET_NAMES, "filter": FILTER, "methods": METHODS,
+            "p": P_VALUES, "criterion": CRITERION, "include_padding": INCLUDE_PADDING,
+            "mask_run": None if MASK_RUN is None else RUN_NAMES[MASK_RUN], "image_mask": IMAGE_MASK,
+            "examples": EXAMPLE_INDICES, "stat": STAT, "band": BAND}
+with open(os.path.join(OUT_DIR, "settings.json"), "w") as f:
+    json.dump(settings, f, indent=2, ensure_ascii=False)
+print(f"Figures et données dans {OUT_DIR}")
+for name in sorted(os.listdir(OUT_DIR)):
+    print("  ", name)'''))
 
 nb["cells"] = cells
 nb["metadata"] = {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
