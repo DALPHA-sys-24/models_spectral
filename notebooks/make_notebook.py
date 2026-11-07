@@ -54,8 +54,14 @@ DEVICE = "/GPU:0"            # "/CPU:0" sans GPU
 # Figures
 STAT, BAND = "median", "quantile"    # médiane et bande 5-95 % ("mean" / "std" possibles)
 # Distribution des lambda_in
+# beaucoup de lambda_in sont nuls (L1) : un pic en 0 écrase un histogramme. Par défaut, deux panneaux :
+#   a : part cumulée des |lambda_in| (la part des nuls est la hauteur de la courbe en 0 ; p du pruning
+#       = part des poids sous le seuil, lisible directement sur l'axe y)
+#   b : densité des lambda_in non nuls, la part des nuls étant indiquée dans le panneau
+HIST_KIND = "split"          # "split" (a + b), "ecdf" (a seul) ou "density" (b seul)
+ZERO_TOL = 1e-3              # |lambda_in| < ZERO_TOL : compté comme nul
 HIST_BINS = 40
-HIST_STYLE = "points"        # "points" (médiane + barres 5-95 %) ou "line" (ligne + bande)
+HIST_STYLE = "line"          # densité : "line" (médiane + bande 5-95 %) ou "points" (médiane + barres)
 HIST_NORMALIZE = False       # True = densité divisée par son maximum (pic = 1)
 HIST_SOURCE = "runs"         # "runs" : histogramme de chaque run, puis médiane (et bande) par classe
                              # "median" : histogramme de la médiane des lambda_in sur les runs (élément par élément)
@@ -211,7 +217,7 @@ print(f"Dataset  : {info.name} ({info.modality}) {info.input_shape}, {info.num_c
 for name, c in zip(RUN_NAMES, configs):
     print(f"  {name:<12} graine {c['args'].get('seed')}  précision test {c.get('test_accuracy', float('nan')):.4f}")'''))
 
-cells.append(md("## 2. Distribution des `lambda_in`\n\nPour chaque run : histogramme (densité) des valeurs brutes de `lambda_in` de la couche montrée, positions de padding retirées, sur des classes communes à tous les runs. Les points sont la médiane des runs dans chaque classe, les barres vont du quantile 5 % au quantile 95 % (`HIST_STYLE = \"line\"` : ligne et bande). Densité brute par défaut (`HIST_NORMALIZE = True` : divisée par son maximum, pic = 1). `HIST_SOURCE = \"median\"` trace plutôt l'histogramme de la médiane des `lambda_in` sur les runs. Une seule densité : tous les `lambda_in` de la couche, sur tous les filtres et tous les canaux."))
+cells.append(md("## 2. Distribution des `lambda_in`\n\nTous les `lambda_in` de la couche montrée (tous les filtres et tous les canaux, positions de padding retirées), pour chaque run ; courbe = médiane des runs, bande = quantiles 5 et 95 %. L'L1 met beaucoup de `lambda_in` à zéro : un histogramme est alors écrasé par le pic en 0. D'où deux panneaux (`HIST_KIND = \"split\"`) : **a**, part cumulée des |`lambda_in`| (la hauteur en 0 est la part des nuls, et l'axe y se lit comme la fraction p retirée par un seuil) ; **b**, densité des `lambda_in` non nuls (|`lambda_in`| ≥ `ZERO_TOL`), la part des nuls étant indiquée dans le panneau."))
 cells.append(code(r'''targets = select_layers(agents[0], LAYERS, "lambda_in")
 spec = spectral_layers(agents[0])
 # indices de convolution : les noms Keras des couches changent d'un modèle chargé à l'autre
@@ -273,19 +279,59 @@ def points(ax, x, d, color, label, marker):
                 mec="white", mew=0.4, elinewidth=0.7, capsize=0, alpha=0.95)
 
 
-fig, ax = figure(HIST_SIZE_MM[1], width_mm=HIST_SIZE_MM[0])
-# une seule densité : tous les lambda_in de la couche (tous les filtres et tous les canaux)
-d = densities(samples_all)
-if HIST_STYLE == "points":
-    points(ax, centers, d, COLORS[1], "All filters and channels", "o")
+# tous les lambda_in de la couche (tous les filtres et tous les canaux), un tableau par run
+absval = [np.abs(s) for s in samples_all]
+zero_share = np.array([np.mean(a < ZERO_TOL) for a in absval])
+nonzero = [s[np.abs(s) >= ZERO_TOL] for s in samples_all]
+zmed = np.median(zero_share)
+zero_label = f"{LAMBDA} ≈ 0: {zmed:.0%}" + (f" [{np.quantile(zero_share, .05):.0%}, {np.quantile(zero_share, .95):.0%}]"
+                                          if len(zero_share) > 1 else "")
+kinds = {"split": ["ecdf", "density"], "ecdf": ["ecdf"], "density": ["density"]}[HIST_KIND]
+if "density" in kinds and min(len(n) for n in nonzero) < 2:
+    print("Presque tous les lambda_in sont nuls : densité des non nuls omise.")
+    kinds = ["ecdf"]
+if len(kinds) == 2:
+    fig, axes = figure(60, 1, 2, width_mm=WIDTH_MM, gridspec_kw={"wspace": 0.3})
 else:
-    band(ax, centers, list(d), COLORS[1], "All filters and channels")
-ax.set_yscale(HIST_YSCALE)
-ax.set_xlabel(LAMBDA)
-ax.set_ylabel("Normalized density" if HIST_NORMALIZE else "Density")
-if HIST_YSCALE != "log":
-    ax.set_ylim(0, 1.08 if HIST_NORMALIZE else None)
+    fig, ax = figure(HIST_SIZE_MM[1], width_mm=HIST_SIZE_MM[0])
+    axes = [ax]
+
+for letter, ax, kind in zip("ab", axes, kinds):
+    if kind == "ecdf":
+        # part des |lambda_in| <= x, pour chaque run, sur une grille commune
+        x = np.linspace(0, max(a.max() for a in absval), 400)
+        cdf = [np.searchsorted(np.sort(a), x, side="right") / a.size for a in absval]
+        band(ax, x, cdf, COLORS[1], None)
+        ax.set_xlabel(f"|{LAMBDA}|")
+        ax.set_ylabel("Cumulative fraction")
+        ax.set_xlim(0, x[-1])
+        ax.set_ylim(0, 1.02)
+    else:
+        lo_, hi_ = min(n.min() for n in nonzero), max(n.max() for n in nonzero)
+        b = np.linspace(lo_, hi_ + 1e-12, HIST_BINS + 1)
+        c = (b[:-1] + b[1:]) / 2
+        d = np.stack([np.histogram(n, b, density=True)[0] for n in nonzero])
+        if HIST_NORMALIZE:
+            d = d / max(np.median(d, 0).max(), 1e-12)
+        if HIST_YSCALE == "log":
+            d = np.where(d > 0, d, np.nan)
+        if HIST_STYLE == "points":
+            points(ax, c, d, COLORS[1], None, "o")
+        else:
+            band(ax, c, list(d), COLORS[1], None)
+        ax.set_yscale(HIST_YSCALE)
+        ax.set_xlabel(f"{LAMBDA} (non-zero)")
+        ax.set_ylabel("Normalized density" if HIST_NORMALIZE else "Density")
+        if HIST_YSCALE != "log":
+            ax.set_ylim(0, None)
+    ax.text(0.97, 0.05 if kind == "ecdf" else 0.95, zero_label, transform=ax.transAxes,
+            ha="right", va="bottom" if kind == "ecdf" else "top", fontsize=style.font_size - 1)
+    if len(kinds) == 2:
+        ax.text(-0.18, 1.04, letter, transform=ax.transAxes, fontweight="bold",
+                fontsize=style.font_size + 1, va="bottom")
 publish(fig, "lambda_in_distribution")
+print(f"lambda_in nuls (|lambda_in| < {ZERO_TOL:g}) : médiane des runs {zmed:.1%}, "
+      f"par run {np.round(100 * zero_share, 1).tolist()} %")
 
 for label, s in (("tous les filtres", samples_all), (f"filtre {FILTER}", samples_filter)):
     q = np.stack([np.quantile(x, [0.05, 0.5, 0.95]) for x in s])
