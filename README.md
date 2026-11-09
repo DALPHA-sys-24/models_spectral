@@ -25,6 +25,7 @@ models_spectral/
 ├── search_hparams.py        cherche lr et batch                     (= specprune-search)
 ├── pruning.py               pruning d'ordre p : pré et/ou post      (= specprune-prune)
 ├── plot_results.py          figures de publication                  (= specprune-plot)
+├── paper_results.py         figures et table de l'article           (= specprune-paper)
 ├── bench_memory.py          mémoire des couches spectrales          (= specprune-bench)
 ├── plan_experiments.py      série découpée en tâches (Slurm, local) (= specprune-plan)
 ├── specprune/               le paquet (les scripts ci-dessus n'en sont que des raccourcis)
@@ -162,6 +163,30 @@ Tout se règle en option : `--xlabel`, `--ylabel`, `--labels`, `--colors`, `--wi
 deux colonnes), `--height_mm`, `--font`, `--font_size`, `--line_width`, `--no_markers`,
 `--legend`, `--xlim`, `--ylim`, `--stat`, `--band`, `--individual`, `--formats`, `--dpi`, `--out`
 (`python plot_results.py pruning -h`). Sans `--out`, la figure va dans `<dossier>/figures/`.
+
+### Figures et table de l'article
+
+`paper_results.py` retrouve seul, dans `runs/` et `runs_pruning/`, le groupe de runs de chaque
+dataset et ses dossiers de pruning (pre des trois méthodes, post), puis écrit dans `paper_figures/` :
+
+| Fichier | Contenu |
+|---|---|
+| `importance_<dataset>`, `importance_all` | carte d'importance des pixels : médiane sur les runs de la moyenne de \|lambda_in\| sur tous les filtres et canaux |
+| `masks_<dataset>` | dégradation du masque selon p (lignes = méthodes, colonnes = p) |
+| `data_<dataset>_example<i>` | effet sur des exemples du test (un pixel retiré prend la couleur moyenne du dataset) |
+| `accuracy_<dataset>`, `accuracy_all` | précision selon p : trois méthodes en pre (traits pleins), post (pointillés) |
+| `table.csv`, `table.tex` | dataset, modèle, méthode, précision sans pruning, pre et post à p = 0.8, pixels utilisés |
+
+```bash
+python paper_results.py                                        # tout, avec runs/ et runs_pruning/
+python paper_results.py --datasets mnist cifar10 --table_p 0.9 --p_show 0 0.5 0.8 0.95
+python paper_results.py --only accuracy table --tag 50ep_x5    # choisir un groupe par son nom
+```
+
+Les masques sont recalculés depuis les `lambda_in` des runs avec la fonction de `pruning.py` et
+ses réglages : ce sont les mêmes masques. Aucun modèle n'est évalué. Tout se règle en option
+(`python paper_results.py -h`) : noms (`--dataset_labels`, `--method_labels`, `--model_label`,
+`--pre_label`, `--post_label`), style, table (`--table_scale`, `--table_band`, `--table_caption`).
 
 ### 4. Série complète
 
