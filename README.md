@@ -184,7 +184,8 @@ python paper_results.py --only accuracy table --tag 50ep_x5    # choisir un grou
 ```
 
 Les masques sont recalculés depuis les `lambda_in` des runs avec la fonction de `pruning.py` et
-ses réglages : ce sont les mêmes masques. Aucun modèle n'est évalué. Tout se règle en option
+ses réglages : ce sont les mêmes masques. Aucun modèle n'est évalué ; les précisions sont relues dans les
+`results*.csv` de `pruning.py` (pas besoin de `--finish` ni de `summary.csv`). Tout se règle en option
 (`python paper_results.py -h`) : noms (`--dataset_labels`, `--method_labels`, `--model_label`,
 `--pre_label`, `--post_label`), style, table (`--table_scale`, `--table_band`, `--table_caption`).
 

@@ -51,6 +51,7 @@ avec plot_results.py, qui les range dans <dossier>/figures/) :
     results.csv       une ligne par (run, mode, p, répétition) : poids retirés, précision, perte...
                       (avec --gpus : results_part<k>.csv, un par processus, lus ensemble)
     summary.csv       par (mode, p) : n, moyenne, médiane, quantiles 5 % et 95 %, écart-type
+    results_all.csv   (tâches Slurm, --gpus) toutes les parts réunies, écrit par --finish
     <run>/masks/p0.50.npz          masques gardés (True = conservé) de chaque couche élaguée
     <run>/post/p0.50_r0/history.csv  réentraînement (+ weights.weights.h5 avec --save_weights)
 """
@@ -493,11 +494,17 @@ def finish(out_dir, expected=False):
                   f"parts manquantes (même commande, elles reprennent), puis --finish.")
     if not rows:
         return
+    if glob.glob(os.path.join(out_dir, "results_part*.csv")):
+        # toutes les parts réunies dans un seul fichier, trié (archive, tableur) ; non relu par les scripts
+        order = {"pre": 0, "post": 1}
+        rows_sorted = sorted(rows, key=lambda r: (r["run"], order.get(r["mode"], 2), float(r["p"]), int(r["repeat"])))
+        write_results(os.path.join(out_dir, "results_all.csv"), rows_sorted)
     summary = summarize(rows, out_dir)
     print(f"\n{'mode':>5} {'p':>5} {'n':>3} {'médiane':>8} {'q05':>7} {'q95':>7}")
     for s in summary:
         print(f"{s['mode']:>5} {s['p']:>5.2f} {s['n']:>3} {s['median']:>8.4f} {s['q05']:>7.4f} {s['q95']:>7.4f}")
-    print(f"\nRésultats : {out_dir}/results*.csv, summary.csv")
+    extra = ", results_all.csv (toutes les parts)" if os.path.exists(os.path.join(out_dir, "results_all.csv")) else ""
+    print(f"\nRésultats : {out_dir}/results*.csv, summary.csv{extra}")
     print(f"Figures   : python plot_results.py pruning {out_dir}")
 
 

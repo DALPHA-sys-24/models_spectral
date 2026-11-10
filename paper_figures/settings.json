@@ -1,0 +1,170 @@
+{
+  "command": "paper_results.py",
+  "args": {
+    "runs_dir": "runs",
+    "pruning_dir": "runs_pruning",
+    "out": "paper_figures",
+    "datasets": null,
+    "groups": null,
+    "tag": "",
+    "only": [
+      "importance",
+      "masks",
+      "data",
+      "accuracy",
+      "table"
+    ],
+    "methods": [
+      "gradient",
+      "element",
+      "mixte"
+    ],
+    "post_methods": null,
+    "p_show": [
+      0.0,
+      0.3,
+      0.5,
+      0.7,
+      0.9
+    ],
+    "layer": null,
+    "mask_run": "0",
+    "image_mask": "all",
+    "filter": 0,
+    "examples": 1,
+    "example_indices": null,
+    "criterion": null,
+    "include_padding": null,
+    "table_p": 0.8,
+    "table_methods": null,
+    "table_scale": "percent",
+    "table_decimals": 1,
+    "table_band": "none",
+    "table_caption": "",
+    "table_label": "tab:results",
+    "dataset_labels": null,
+    "method_labels": null,
+    "model_label": "",
+    "pre_label": "{method}",
+    "post_label": "{method}, retrained",
+    "xlabel": "Pruning ratio p",
+    "ylabel": "Accuracy",
+    "panel_labels": "letters",
+    "formats": [
+      "pdf",
+      "png"
+    ],
+    "dpi": 600,
+    "width_mm": 183.0,
+    "accuracy_size_mm": [
+      89.0,
+      60.0
+    ],
+    "importance_size_mm": 55.0,
+    "font": "Arial",
+    "font_size": 7.0,
+    "line_width": 1.2,
+    "marker_size": 3.5,
+    "no_markers": false,
+    "colors": [
+      "#E07B00",
+      "#0072B2",
+      "#009E73"
+    ],
+    "post_style": "--",
+    "legend": "best",
+    "ylim": [
+      0.0,
+      1.02
+    ],
+    "stat": "median",
+    "band": "quantile",
+    "chance": "auto",
+    "importance_colors": [
+      "#ffffff",
+      "#9ecae1",
+      "#0072B2",
+      "#08306b"
+    ]
+  },
+  "datasets": {
+    "mnist": {
+      "group": "runs/mnist_spectral_resnet20_50ep_x5",
+      "runs": [
+        "runs/mnist_spectral_resnet20_50ep_x5/seed42",
+        "runs/mnist_spectral_resnet20_50ep_x5/seed43",
+        "runs/mnist_spectral_resnet20_50ep_x5/seed44",
+        "runs/mnist_spectral_resnet20_50ep_x5/seed45",
+        "runs/mnist_spectral_resnet20_50ep_x5/seed46"
+      ],
+      "pruning": {
+        "pre": {
+          "element": "runs_pruning/mnist_spectral_resnet20_50ep_x5_pre_element",
+          "gradient": "runs_pruning/mnist_spectral_resnet20_50ep_x5_pre_gradient",
+          "mixte": "runs_pruning/mnist_spectral_resnet20_50ep_x5_pre_mixte"
+        },
+        "post": {
+          "element": "runs_pruning/mnist_spectral_resnet20_50ep_x5_post_element",
+          "gradient": "runs_pruning/mnist_spectral_resnet20_50ep_x5_post_gradient",
+          "mixte": "runs_pruning/mnist_spectral_resnet20_50ep_x5_post_mixte"
+        }
+      },
+      "layer": "spec_cnn2d",
+      "conv_index": 0,
+      "criterion": "percentile",
+      "include_padding": false
+    },
+    "fashion_mnist": {
+      "group": "runs/fashion_mnist_spectral_resnet20_50ep_x5",
+      "runs": [
+        "runs/fashion_mnist_spectral_resnet20_50ep_x5/seed42",
+        "runs/fashion_mnist_spectral_resnet20_50ep_x5/seed43",
+        "runs/fashion_mnist_spectral_resnet20_50ep_x5/seed44",
+        "runs/fashion_mnist_spectral_resnet20_50ep_x5/seed45",
+        "runs/fashion_mnist_spectral_resnet20_50ep_x5/seed46"
+      ],
+      "pruning": {
+        "pre": {
+          "element": "runs_pruning/fashion_mnist_spectral_resnet20_50ep_x5_pre_element",
+          "gradient": "runs_pruning/fashion_mnist_spectral_resnet20_50ep_x5_pre_gradient",
+          "mixte": "runs_pruning/fashion_mnist_spectral_resnet20_50ep_x5_pre_mixte"
+        },
+        "post": {
+          "element": "runs_pruning/fashion_mnist_spectral_resnet20_50ep_x5_post_element",
+          "gradient": "runs_pruning/fashion_mnist_spectral_resnet20_50ep_x5_post_gradient",
+          "mixte": "runs_pruning/fashion_mnist_spectral_resnet20_50ep_x5_post_mixte"
+        }
+      },
+      "layer": "spec_cnn2d",
+      "conv_index": 0,
+      "criterion": "percentile",
+      "include_padding": false
+    },
+    "cifar10": {
+      "group": "runs/cifar10_spectral_resnet20_50ep_x5",
+      "runs": [
+        "runs/cifar10_spectral_resnet20_50ep_x5/seed42",
+        "runs/cifar10_spectral_resnet20_50ep_x5/seed43",
+        "runs/cifar10_spectral_resnet20_50ep_x5/seed44",
+        "runs/cifar10_spectral_resnet20_50ep_x5/seed45",
+        "runs/cifar10_spectral_resnet20_50ep_x5/seed46"
+      ],
+      "pruning": {
+        "pre": {
+          "element": "runs_pruning/cifar10_spectral_resnet20_50ep_x5_pre_element",
+          "gradient": "runs_pruning/cifar10_spectral_resnet20_50ep_x5_pre_gradient",
+          "mixte": "runs_pruning/cifar10_spectral_resnet20_50ep_x5_pre_mixte"
+        },
+        "post": {
+          "element": "runs_pruning/cifar10_spectral_resnet20_50ep_x5_post_element",
+          "gradient": "runs_pruning/cifar10_spectral_resnet20_50ep_x5_post_gradient",
+          "mixte": "runs_pruning/cifar10_spectral_resnet20_50ep_x5_post_mixte"
+        }
+      },
+      "layer": "spec_cnn2d",
+      "conv_index": 0,
+      "criterion": "percentile",
+      "include_padding": false
+    }
+  }
+}

@@ -1,0 +1,18 @@
+% Nécessite \usepackage{booktabs}
+\begin{tabular}{lllccccc}
+\toprule
+Dataset & Model & Method & No pruning (\%) & Pre-training, $p=0.8$ (\%) & Post-training, $p=0.8$ (\%) & Pixels used & Pixels per filter \\
+\midrule
+MNIST & Spectral ResNet-20 & Gradient & 99.5 & 99.2 & 99.4 & 762/784 (97\%) & 157 (20\%) \\
+ &  & Element &  & 99.2 & 99.4 & 762/784 (97\%) & 157 (20\%) \\
+ &  & Mixed &  & 99.2 & 99.3 & 157/784 (20\%) & 157 (20\%) \\
+\midrule
+Fashion-MNIST & Spectral ResNet-20 & Gradient & 91.4 & 13.2 & 89.6 & 762/784 (97\%) & 157 (20\%) \\
+ &  & Element &  & 13.2 & 89.9 & 762/784 (97\%) & 157 (20\%) \\
+ &  & Mixed &  & 13.2 & 89.9 & 157/784 (20\%) & 157 (20\%) \\
+\midrule
+CIFAR-10 & Spectral ResNet-20 & Gradient & 82.1 & 82.0 & 84.9 & 1024/1024 (100\%) & 509 (50\%) \\
+ &  & Element &  & 42.6 & 81.3 & 984/1024 (96\%) & 205 (20\%) \\
+ &  & Mixed &  & 15.0 & 76.8 & 205/1024 (20\%) & 205 (20\%) \\
+\bottomrule
+\end{tabular}

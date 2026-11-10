@@ -17,7 +17,8 @@ pruning (pre pour chaque méthode, post), puis produit :
 Les masques sont recalculés depuis les lambda_in enregistrés par run_experiment.py
 (<run>/spectral/), avec la même fonction et les mêmes réglages (critère, padding) que les
 dossiers de pruning : ce sont exactement les masques de pruning.py. Aucun modèle n'est chargé ni
-évalué ; les précisions viennent des summary.csv de pruning.py et des config.json des runs.
+évalué ; les précisions viennent des résultats de pruning.py (results*.csv, même si --finish n'a pas
+été lancé : summary.csv n'est pas nécessaire) et des config.json des runs.
 
 Figures : style Nature Communications, sans titre, textes en anglais, PDF vectoriel + PNG 600 dpi.
 
@@ -221,7 +222,7 @@ def find_pruning(pruning_dir: str, group_dir: str) -> Dict[str, Dict[str, str]]:
     name = os.path.basename(group_dir)
     found: Dict[str, Dict[str, List[str]]] = {"pre": {}, "post": {}}
     for d in sorted(glob.glob(os.path.join(pruning_dir, "*"))):
-        if not (os.path.exists(os.path.join(d, "config.json")) and os.path.exists(os.path.join(d, "summary.csv"))):
+        if not (os.path.exists(os.path.join(d, "config.json")) and result_files(d)):
             continue
         c = read_json(os.path.join(d, "config.json"))
         parents = {os.path.basename(os.path.dirname(os.path.normpath(r))) for r in c.get("runs", [])}
@@ -245,10 +246,51 @@ def find_pruning(pruning_dir: str, group_dir: str) -> Dict[str, Dict[str, str]]:
     return out
 
 
+def result_files(pruning_dir: str) -> List[str]:
+    """results.csv et results_part<k>.csv (tâches Slurm, --gpus) d'un dossier de pruning.py."""
+    return [f for f in [os.path.join(pruning_dir, "results.csv")]
+            + sorted(glob.glob(os.path.join(pruning_dir, "results_part*.csv"))) if os.path.exists(f)]
+
+
+_CHECKED = set()
+
+
 def read_summary(pruning_dir: str, mode: str) -> Dict[str, np.ndarray]:
-    with open(os.path.join(pruning_dir, "summary.csv")) as f:
-        rows = sorted((r for r in csv.DictReader(f) if r["mode"] == mode), key=lambda r: float(r["p"]))
-    return {k: np.array([float(r[k]) for r in rows]) for k in ("p", "n", "mean", "median", "q05", "q95", "std")}
+    """
+    Statistiques de la précision test par p, recalculées depuis results*.csv (comme le summary.csv
+    de pruning.py --finish, qui n'est donc pas nécessaire). Sans results*.csv : summary.csv.
+    Avertit si des lignes manquent (tâches Slurm non terminées).
+    """
+    rows = {}
+    for f in result_files(pruning_dir):
+        with open(f) as fh:
+            for r in csv.DictReader(fh):
+                if r.get("test_accuracy") not in (None, ""):
+                    rows[(r["run"], r["mode"], r["p"], r.get("repeat", "0"))] = r
+    if not rows:
+        with open(os.path.join(pruning_dir, "summary.csv")) as f:
+            srows = sorted((r for r in csv.DictReader(f) if r["mode"] == mode), key=lambda r: float(r["p"]))
+        return {k: np.array([float(r[k]) for r in srows]) for k in ("p", "n", "mean", "median", "q05", "q95", "std")}
+    if (pruning_dir, mode) not in _CHECKED:
+        _CHECKED.add((pruning_dir, mode))
+        a = read_json(os.path.join(pruning_dir, "config.json")).get("args", {})
+        expected = len(a.get("run_dirs", [])) * len(a.get("p", [])) * (a.get("repeats", 1) if mode == "post" else 1)
+        n = sum(1 for k in rows if k[1] == mode)
+        if expected and n < expected:
+            print(f"  Attention : {os.path.basename(pruning_dir)} ({mode}) : {n} résultats sur {expected} "
+                  "attendus (tâches non terminées ?) ; statistiques sur ceux présents")
+    by_p: Dict[float, List[float]] = {}
+    for (_, m, p, _), r in rows.items():
+        if m == mode:
+            by_p.setdefault(float(p), []).append(float(r["test_accuracy"]))
+    ps = sorted(by_p)
+    stats = {"p": [], "n": [], "mean": [], "median": [], "q05": [], "q95": [], "std": []}
+    for p in ps:
+        v = np.array(by_p[p])
+        for k, x in (("p", p), ("n", len(v)), ("mean", v.mean()), ("median", np.median(v)),
+                     ("q05", np.quantile(v, 0.05)), ("q95", np.quantile(v, 0.95)), ("std", v.std())):
+            stats[k].append(x)
+    return {k: np.array(v, float) for k, v in stats.items()}
 
 
 # --- lambda_in et masques, depuis les fichiers des runs --------------------------------
